@@ -31,11 +31,21 @@ Repoda **Settings → Secrets and variables → Actions** altında şu secret’
 
 ## Nasıl Release Çıkarılır?
 
+### Otomatik (önerilen)
+
+1. GitHub’da repoya gidin → **Actions** sekmesi.
+2. Sol menüden **"Release: Create & Publish"** workflow’unu seçin.
+3. **Run workflow** → **version** alanına sürüm yazın (örn. `1.1.3`) → **Run workflow**.
+4. Workflow: `package.json` sürümünü günceller, commit/tag atar, GitHub Release oluşturur. Release yayınlanınca **Build & Upload to R2 on Release** otomatik çalışır ve dosyalar R2’ye gider.
+
+### Manuel
+
 1. `package.json` içinde `version` değerini artırın (örn. `1.1.3`).
 2. Değişiklikleri commit edip push edin.
-3. GitHub’da **Releases → Create a new release** ile yeni tag (örn. `v1.1.3`) ve release oluşturup **Publish** deyin.
-4. Workflow otomatik çalışır; build bittikten sonra dosyalar R2’de `updates/` altında olur.
+3. **Releases → Create a new release** ile tag `v1.1.3` ve release oluşturup **Publish** deyin.
+4. **Build & Upload to R2** otomatik çalışır; dosyalar R2’de `updates/` altında olur.
 
-## Workflow Dosyası
+## Workflow Dosyaları
 
+- `.github/workflows/release-publish.yml` — Manuel tetikle: sürüm günceller, tag + release oluşturur (tek tıkla release).
 - `.github/workflows/release-r2.yml` — Release yayınlandığında tetiklenir, build alır ve R2’ye yükler.

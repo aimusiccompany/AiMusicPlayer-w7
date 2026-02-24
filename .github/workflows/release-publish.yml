@@ -1,0 +1,64 @@
+# Manuel tetikle: Sürüm günceller, tag + release oluşturur. Release yayınlanınca "Build & Upload to R2" otomatik çalışır.
+# Kullanım: Actions → Release: Create & Publish → Run workflow → version (örn. 1.1.2) gir → Run workflow
+
+name: Release: Create & Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Sürüm numarası (örn. 1.1.2)'
+        required: true
+        type: string
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set version in package.json
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          node -e "
+            const fs = require('fs');
+            const p = require('./package.json');
+            p.version = process.env.VERSION;
+            fs.writeFileSync('package.json', JSON.stringify(p, null, 2));
+          "
+          env:
+            VERSION: ${{ github.event.inputs.version }}
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git diff --staged --quiet || git commit -m "chore: release v${{ github.event.inputs.version }}"
+
+      - name: Push commit
+        run: git push
+
+      - name: Create tag and push
+        run: |
+          TAG="v${{ github.event.inputs.version }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          TAG="v$VERSION"
+          BODY="Release v$VERSION - AI Music Player"
+          curl -sS -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases" \
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"body\":\"$BODY\"}"
