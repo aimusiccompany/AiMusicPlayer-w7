@@ -1,7 +1,6 @@
 const { app, BrowserWindow, ipcMain, globalShortcut, shell, dialog } = require('electron');
 const path = require('path');
 const { serve } = require('./server.js');
-const { autoUpdater } = require('electron-updater');
 
 // Windows 7 / düşük RAM (2–4 GB): Electron 22 ile uyumludur; tek pencereli ve yerel sunucu ile kaynak kullanımı sınırlı tutulur.
 let mainWindow = null;
@@ -76,6 +75,13 @@ function setOpenAtLogin() {
 // Güncelleme adresi package.json → build.publish[].url (generic sunucu). Yayın için: npm run dist sonrası dist/ içindeki .exe ve latest.yml dosyasını bu URL’e yükleyin.
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
+  let autoUpdater;
+  try {
+    autoUpdater = require('electron-updater').autoUpdater;
+  } catch (e) {
+    console.warn('electron-updater yüklenemedi, güncelleme devre dışı:', e.message);
+    return;
+  }
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
