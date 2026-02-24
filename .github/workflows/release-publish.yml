@@ -63,6 +63,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
+      # Sadece kurulum EXE + latest.yml (R2 ve Release için; unpacked, blockmap, builder-debug atılmaz)
+      - name: Prepare release assets (Setup exe + latest.yml only)
+        run: |
+          mkdir -p dist-upload
+          cp dist/*Setup*.exe dist-upload/ 2>/dev/null || true
+          cp dist/latest.yml dist-upload/ 2>/dev/null || true
+          ls -la dist-upload/
+
       - name: Upload to Cloudflare R2
         uses: ryand56/r2-upload-action@v1.4
         with:
@@ -70,7 +78,7 @@ jobs:
           r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: dist
+          source-dir: dist-upload
           destination-dir: updates
           output-file-url: true
 
@@ -95,13 +103,14 @@ jobs:
           VERSION="${{ github.event.inputs.version }}"
           TAG="v$VERSION"
           BODY="Release v$VERSION - AI Music Player"
-          RESPONSE=$(curl -sS -X POST \
+          curl -sS -X POST \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/${{ github.repository }}/releases" \
-            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"body\":\"$BODY\"}")
-          UPLOAD_URL=$(echo "$RESPONSE" | node -e "let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>{try{const j=JSON.parse(d);console.log((j.upload_url||'').replace(/\{.*/,''))}catch(e){console.log('')}})")
-          for f in dist/*.exe dist/*.yml; do
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"body\":\"$BODY\"}" > release.json
+          UPLOAD_URL=$(node -e "const j=JSON.parse(require('fs').readFileSync('release.json','utf8')); console.log((j.upload_url||'').replace(/\{.*/,''))")
+          if [ -z "$UPLOAD_URL" ]; then echo "No upload_url in response"; cat release.json; exit 1; fi
+          for f in dist-upload/*Setup*.exe dist-upload/latest.yml; do
             [ -f "$f" ] || continue
             name=$(basename "$f")
             echo "Uploading $name to Release..."
@@ -109,5 +118,5 @@ jobs:
               -H "Authorization: token $GITHUB_TOKEN" \
               -H "Content-Type: application/octet-stream" \
               --data-binary "@$f" \
-              "${UPLOAD_URL}?name=$name"
+              "${UPLOAD_URL}?name=$(echo -n "$name" | sed 's/ /%20/g')"
           done
