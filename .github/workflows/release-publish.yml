@@ -13,7 +13,10 @@ on:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: write
     steps:
@@ -58,6 +61,7 @@ jobs:
         run: npm run dist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: Upload to Cloudflare R2
         uses: ryand56/r2-upload-action@v1.4
@@ -96,7 +100,7 @@ jobs:
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/${{ github.repository }}/releases" \
             -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"body\":\"$BODY\"}")
-          UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url' | sed 's/{.*$//')
+          UPLOAD_URL=$(echo "$RESPONSE" | node -e "let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>{try{const j=JSON.parse(d);console.log((j.upload_url||'').replace(/\{.*/,''))}catch(e){console.log('')}})")
           for f in dist/*.exe dist/*.yml; do
             [ -f "$f" ] || continue
             name=$(basename "$f")
