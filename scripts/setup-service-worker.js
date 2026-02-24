@@ -20,6 +20,11 @@ if (!fs.existsSync(swSource)) {
 }
 
 fs.copyFileSync(swSource, swDest);
+let swContent = fs.readFileSync(swDest, 'utf8');
+if (swContent.includes('sourceMappingURL=')) {
+  swContent = swContent.replace(/\n?\/\/# sourceMappingURL=.*$/m, '');
+  fs.writeFileSync(swDest, swContent);
+}
 console.log('Service worker kopyalandı:', swDest);
 if (fs.existsSync(mapSource)) {
   fs.copyFileSync(mapSource, mapDest);

@@ -345,4 +345,3 @@ async function cacheFullFileInBackground(request) {
         console.error(`Failed to cache file: ${request.url}`, error);
     }
 }
-//# sourceMappingURL=file-cache-manager-sw.js.map
