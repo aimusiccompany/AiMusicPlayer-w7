@@ -23,16 +23,15 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set version in package.json
+        env:
+          VERSION: ${{ github.event.inputs.version }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
           node -e "
             const fs = require('fs');
             const p = require('./package.json');
             p.version = process.env.VERSION;
             fs.writeFileSync('package.json', JSON.stringify(p, null, 2));
           "
-          env:
-            VERSION: ${{ github.event.inputs.version }}
 
       - name: Commit version bump
         run: |
