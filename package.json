@@ -36,7 +36,9 @@
   "build": {
     "appId": "com.aimusic.player",
     "productName": "AI Music Player",
-    "asarUnpack": ["**/node_modules/electron-updater/**"],
+    "asarUnpack": [
+      "**/node_modules/electron-updater/**"
+    ],
     "publish": [
       {
         "provider": "generic",
