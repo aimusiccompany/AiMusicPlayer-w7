@@ -1,13 +1,13 @@
 # Manuel tetikle: Sürüm günceller, tag + release oluşturur. Release yayınlanınca "Build & Upload to R2" otomatik çalışır.
 # Kullanım: Actions → Release: Create & Publish → Run workflow → version (örn. 1.1.2) gir → Run workflow
 
-name: Release: Create & Publish
+name: "Release: Create and Publish"
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Sürüm numarası (örn. 1.1.2)'
+        description: "Sürüm numarası (örn. 1.1.2)"
         required: true
         type: string
 
