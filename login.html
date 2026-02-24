@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://api.aimusic.com.tr https://cdn.jsdelivr.net; img-src 'self' data: https:;">
+  <title>Giriş - AI Music Player</title>
+  <link rel="stylesheet" href="login.css">
+</head>
+<body>
+  <script src="sw-register.js"></script>
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-header">
+        <img src="assets/ai-music-logo.png" alt="AI Music" class="login-logo" data-fallback="next">
+        <div class="login-logo-fallback">
+          <span class="logo-ai">ai</span><span class="logo-music"> music</span>
+        </div>
+        <h1>AI Music Player</h1>
+        <p>Hesabınıza giriş yapın</p>
+      </div>
+
+      <form id="login-form" class="login-form" novalidate>
+        <div class="field">
+          <label for="email">E-posta</label>
+          <input type="email" id="email" name="email" autocomplete="email" placeholder="ornek@email.com" required>
+        </div>
+        <div class="field">
+          <label for="password">Şifre</label>
+          <div class="password-wrap">
+            <input type="password" id="password" name="password" autocomplete="current-password" placeholder="••••••••" required>
+            <button type="button" class="btn-toggle-password" id="btn-show-password" title="Şifreyi göster" aria-label="Şifreyi göster">
+              <span class="icon-show">Göster</span>
+              <span class="icon-hide">Gizle</span>
+            </button>
+          </div>
+        </div>
+        <p class="login-error" id="login-error" role="alert"></p>
+        <button type="submit" class="btn-login" id="btn-login">Giriş Yap</button>
+      </form>
+
+      <p class="app-version" id="app-version">Sürüm —</p>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="login.js"></script>
+</body>
+</html>

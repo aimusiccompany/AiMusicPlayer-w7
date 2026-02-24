@@ -1,0 +1,52 @@
+# Release yayınlandığında Electron build alınır ve çıktılar Cloudflare R2'ye yüklenir.
+# Gerekli GitHub Secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
+# Opsiyonel: NPM_TOKEN (GitHub Packages için, @ai-music-corp paketleri)
+
+name: Build & Upload to R2 on Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # GitHub Packages (@ai-music-corp) için .npmrc — NPM_TOKEN secret'ı tanımlıysa
+      - name: Configure npm for GitHub Packages
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        run: |
+          echo "@ai-music-corp:registry=https://npm.pkg.github.com/" >> .npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> .npmrc
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build app bundle
+        run: npm run build
+
+      - name: Build Electron (dist)
+        run: npm run dist
+        env:
+          # electron-builder için gerekirse
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to Cloudflare R2
+        uses: ryand56/r2-upload-action@v1.4
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: dist
+          destination-dir: updates
+          output-file-url: true

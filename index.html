@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://api.aimusic.com.tr https://cdn.jsdelivr.net; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' https://cdn.aimusic.com.tr https:;">
+  <title>AI Music Player</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-theme="dark">
+  <div class="app">
+    <!-- Sol sidebar - Navigasyon -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo logo-sidebar">
+          <img src="assets/ai-music-logo.png" alt="AI Music" class="logo-img" data-fallback="next">
+          <span class="logo-fallback"><span class="logo-ai">ai</span><span class="logo-music"> music</span></span>
+        </div>
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-user-name-wrap" id="sidebar-user-name-wrap">
+          <span class="sidebar-user-line1" id="sidebar-user-line1">—</span>
+          <span class="sidebar-user-line2" id="sidebar-user-line2"></span>
+          <span class="sidebar-location-mini" id="sidebar-location-mini"></span>
+          <p class="sidebar-date-mini" id="sidebar-date">—</p>
+          <p class="sidebar-time-mini" id="sidebar-time">—</p>
+          <span class="status status-mini online" id="sidebar-status">
+            <span class="status-dot"></span>
+            <span id="sidebar-status-text">Çevrimiçi</span>
+          </span>
+        </div>
+      </div>
+      <nav class="nav">
+        <p class="nav-heading">KÜTÜPHANEM</p>
+        <a href="#" class="nav-link" data-view="favorites">
+          <span class="nav-icon heart">♥</span> Beğenilen Şarkılar
+        </a>
+        <a href="#" class="nav-link active" data-view="playlist">
+          <span class="nav-icon note">♪</span> Çalma Listesi
+        </a>
+        <a href="#" class="nav-link" data-view="ads">
+          <span class="nav-icon play">▶</span> Reklamlarım
+        </a>
+        <a href="#" class="nav-link" data-view="contact">
+          <span class="nav-icon contact">✉</span> İletişim
+        </a>
+        <a href="#" class="nav-link" data-view="settings">
+          <span class="nav-icon gear">⚙</span> Ayarlar
+        </a>
+        <a href="#" class="nav-link" data-view="logout">
+          <span class="nav-icon exit">→</span> Çıkış Yap
+        </a>
+      </nav>
+    </aside>
+
+    <!-- Ana içerik -->
+    <main class="main-content">
+      <section class="now-playing-card" id="now-playing-card">
+        <div class="now-playing-art">
+          <img src="" alt="" class="now-playing-art-img" id="now-playing-art-img" data-fallback="next">
+          <div class="album-art-placeholder" id="now-playing-art-placeholder">—</div>
+        </div>
+        <div class="now-playing-info">
+          <span class="now-playing-greeting" id="now-playing-greeting">İyi Günler</span>
+          <span class="now-playing-badge" id="content-badge">Şu an çalınıyor</span>
+          <h3 class="now-playing-title" id="now-playing-title">—</h3>
+          <p class="now-playing-genre" id="now-playing-genre">—</p>
+        </div>
+        <button type="button" class="btn-playing" id="btn-now-playing-state">
+          <span class="btn-playing-dot" id="btn-playing-dot"></span>
+          <span class="btn-playing-text" id="btn-playing-text">Çalınıyor</span>
+        </button>
+      </section>
+
+      <section class="playlist-section">
+        <div class="playlist-heading-row" id="content-heading-row">
+          <h3 class="playlist-heading" id="content-heading">Çalma Listesi</h3>
+          <span class="playlist-count-pill content-count-pill" id="content-count">0 parça</span>
+          <div class="playlist-update-indicator" id="playlist-update-indicator" aria-hidden="true">
+            <span class="playlist-update-spinner" aria-label="Güncelleniyor"></span>
+            <span class="playlist-update-text">Yayın Akışınız Güncellenmektedir!</span>
+          </div>
+        </div>
+        <div class="playlist-list-wrap">
+          <div class="playlist-toolbar">
+            <span class="col-num">SIRA</span>
+            <span class="col-art"></span>
+            <span class="col-title">Başlık</span>
+            <span class="col-time">Zaman</span>
+            <span class="col-duration">Süre</span>
+            <span class="col-tag">Etiket</span>
+            <span class="col-actions">Beğen</span>
+          </div>
+          <ul class="playlist" id="playlist"></ul>
+          <div class="playlist-loading" id="playlist-loading" aria-hidden="false">
+            <div class="playlist-loading-spinner" aria-label="Çalma listesi yükleniyor"></div>
+            <p class="playlist-loading-text">Çalma listesi yükleniyor…</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Sağ panel - Reklamlar -->
+    <aside class="ads-panel">
+      <div class="ads-header">
+        <div class="ads-header-top">
+          <h3 class="ads-title">Reklamlarım</h3>
+          <span class="ads-count-pill" id="ads-count">0 Anons</span>
+        </div>
+        <p class="ads-subtitle">Zamanlanmış anonslar</p>
+      </div>
+      <ul class="ads-list" id="ads-list"></ul>
+    </aside>
+
+    <!-- Alt oynatıcı çubuğu -->
+    <footer class="player-bar">
+      <div class="player-left">
+        <div class="player-art">
+          <img src="" alt="" class="player-art-img" id="player-art-img" data-fallback="next">
+          <div class="album-art-placeholder small" id="player-art-placeholder">—</div>
+        </div>
+        <div class="player-song-info">
+          <span class="player-title" id="player-title">—</span>
+          <span class="player-artist" id="player-artist">—</span>
+        </div>
+      </div>
+      <div class="player-center">
+        <div class="player-controls">
+          <button type="button" class="ctrl-btn play-btn" id="btn-play" title="Oynat/Duraklat"><span class="ctrl-icon-symbol ctrl-play-symbol">⏸</span></button>
+        </div>
+        <div class="progress-wrap">
+          <span class="progress-time current" id="progress-current">0:00</span>
+          <div class="progress-bar" id="progress-bar">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+          <span class="progress-time total" id="progress-total">0:00</span>
+        </div>
+      </div>
+      <div class="player-right">
+        <input type="range" class="volume-slider" id="volume" min="0" max="100" value="70" title="Ses">
+        <span class="volume-percent" id="volume-percent">70%</span>
+      </div>
+    </footer>
+  </div>
+
+  <audio id="app-audio" style="display:none" crossorigin="anonymous"></audio>
+
+  <!-- İletişim modal -->
+  <div class="contact-overlay" id="contact-overlay" aria-hidden="true">
+    <div class="contact-modal" role="dialog" aria-labelledby="contact-title">
+      <h2 class="contact-title" id="contact-title">İletişim</h2>
+      <p class="contact-intro">Uygulamamız, yayınlarımız veya hizmetlerimizle ilgili her türlü soru, görüş ve talebiniz için yanınızdayız. Deneyiminizi geliştirmek ve sorularınıza hızlı çözümler sunmak adına aşağıdaki kanallar üzerinden bizimle doğrudan iletişime geçebilirsiniz.</p>
+      <div class="contact-actions">
+        <button type="button" class="contact-btn contact-btn-whatsapp" id="contact-whatsapp" title="WhatsApp ile yaz">
+          <span class="contact-btn-icon">WhatsApp</span>
+          <span class="contact-btn-label">+90 546 263 09 02</span>
+        </button>
+        <button type="button" class="contact-btn contact-btn-mail" id="contact-mail" title="E-posta gönder">
+          <span class="contact-btn-icon">E-posta</span>
+          <span class="contact-btn-label">teknik@aimusic.com.tr</span>
+        </button>
+      </div>
+      <button type="button" class="contact-close" id="contact-close">Kapat</button>
+    </div>
+  </div>
+
+  <!-- Ayarlar modal -->
+  <div class="settings-overlay" id="settings-overlay" aria-hidden="true">
+    <div class="settings-modal" role="dialog" aria-labelledby="settings-title">
+      <h2 class="settings-title" id="settings-title">Ayarlar</h2>
+      <div class="settings-row">
+        <label for="settings-speaker">Hoparlör</label>
+        <select id="settings-speaker" class="settings-select">
+          <option value="default">Varsayılan</option>
+        </select>
+      </div>
+      <div class="settings-row">
+        <label for="settings-theme">Tema</label>
+        <select id="settings-theme" class="settings-select">
+          <option value="dark">Koyu</option>
+          <option value="light">Açık</option>
+        </select>
+      </div>
+      <div class="settings-row settings-version">
+        <span class="settings-version-label">Sürüm</span>
+        <span class="settings-version-value" id="settings-version">—</span>
+      </div>
+      <button type="button" class="settings-close" id="settings-close">Kapat</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="sw-register.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
