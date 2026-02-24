@@ -21,12 +21,15 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      # GitHub Packages (@ai-music-corp) için .npmrc — NPM_TOKEN secret'ı tanımlıysa
+      # GitHub Packages (@ai-music-corp) için .npmrc — NPM_TOKEN secret'ı tanımlıysa yazılır (if'te secrets kullanılamaz)
       - name: Configure npm for GitHub Packages
-        if: ${{ secrets.NPM_TOKEN != '' }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          echo "@ai-music-corp:registry=https://npm.pkg.github.com/" >> .npmrc
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> .npmrc
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "@ai-music-corp:registry=https://npm.pkg.github.com/" >> .npmrc
+            echo "//npm.pkg.github.com/:_authToken=$NPM_TOKEN" >> .npmrc
+          fi
 
       - name: Install dependencies
         run: npm ci
