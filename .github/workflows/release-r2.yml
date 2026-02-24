@@ -53,3 +53,22 @@ jobs:
           source-dir: dist
           destination-dir: updates
           output-file-url: true
+
+      # EXE ve latest.yml dosyalarını GitHub Release sayfasına ekle (indirilebilir asset)
+      - name: Upload assets to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          UPLOAD_URL="${{ github.event.release.upload_url }}"
+          # {?name,label} kısmını kaldır
+          UPLOAD_URL="${UPLOAD_URL%\{*}"
+          for f in dist/*.exe dist/*.yml; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f")
+            echo "Uploading $name..."
+            curl -sS -X POST \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$f" \
+              "${UPLOAD_URL}?name=$name"
+          done
