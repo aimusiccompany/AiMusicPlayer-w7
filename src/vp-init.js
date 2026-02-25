@@ -16,9 +16,28 @@ const DAY = 86400000 // 24 * 60 * 60 * 1000
 const SUPABASE_URL = 'https://api.aimusic.com.tr'
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp1aXN1aHVlcHZxc2Nzd2NvY3FpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTgwNDUzODUsImV4cCI6MjAzMzYyMTM4NX0.Lo0dFFPUNvsLIBxitmsi_mmTtDlVABsqgd74rGrvHq0'
 
-function snapshotToPlayerState(system, playback, playlist, ad, specialAd, stockAd, upcomingSchedule = []) {
+function snapshotToPlayerState(system, playback, playlist, ad, specialAd, stockAd, upcomingSchedule = [], deviceTimeMs = null) {
   const sys = system || {}
-  const rec = sys.activeRecord || (playback || {}).activeRecord
+  const devMs = deviceTimeMs != null ? deviceTimeMs : getDeviceTimeMs()
+  let rec = sys.activeRecord || (playback || {}).activeRecord
+  let deviceTimeRecordIndex = -1
+  if (!upcomingSchedule || upcomingSchedule.length === 0) {
+    rec = null
+  } else {
+    for (let i = 0; i < upcomingSchedule.length; i++) {
+      const r = upcomingSchedule[i]
+      const startMs = r.startTime != null ? r.startTime : 0
+      const endMs = r.endTime != null ? r.endTime : (startMs + (r.audio && r.audio.duration ? r.audio.duration : 0))
+      if (devMs >= startMs && devMs < endMs) {
+        rec = r
+        deviceTimeRecordIndex = i
+        break
+      }
+    }
+    // Hiçbir slotta değilsek (deviceTimeRecordIndex < 0) çalma; 24:00 placeholder tek kayıt olabilir
+    if (deviceTimeRecordIndex < 0) rec = null
+  }
+  const broadcastEnded = rec === null && upcomingSchedule && upcomingSchedule.length > 0
   const songQueue = (playback || {}).songQueue || []
   const playlists = (playlist || {}).playlists || []
   const userPlaylists = (playlist || {}).userPlaylists || []
@@ -27,14 +46,35 @@ function snapshotToPlayerState(system, playback, playlist, ad, specialAd, stockA
   const stockAdSchedules = (stockAd || {}).schedules || []
   const activePlaylist = sys.activePlaylist
   const songs = activePlaylist && activePlaylist.songs ? activePlaylist.songs : []
-  const currentTimeMs = sys.currentTime != null ? sys.currentTime : 0
-  const currentTime = currentTimeMs / 1000
   const duration = rec && rec.audio ? rec.audio.duration / 1000 : 0
-  const currentIndex = rec && songs.length ? songs.findIndex(s => s.id === rec.id) : -1
-  const playOffset = rec ? (currentTimeMs - rec.startTime) / 1000 : 0
+  const playOffset = rec ? Math.max(0, (devMs - (rec.startTime != null ? rec.startTime : 0)) / 1000) : 0
 
   // Referans: ana liste VP'nin ürettiği upcomingSchedule (history) ile aynı; her kayıt gerçek startTime/endTime ve coverUrl taşır
-  const mergedPlaylist = (upcomingSchedule || []).map((record) => {
+  // Yayın bitmişse geçmiş listeyi gösterme; 24:00:00 placeholder kayıtlarını listeden çıkar
+  let recordsToMap = broadcastEnded ? [] : ((upcomingSchedule || []).filter((r) => {
+    const start = r.startTime != null ? r.startTime : 0
+    return start < DAY
+  }))
+  if (!broadcastEnded && typeof window !== 'undefined' && window.playerState && window.playerState.playlist && window.playerState.playlist.length > 0) {
+    const prev = window.playerState.playlist
+    const pastItems = prev.filter((item) => (item.endTimeMs != null ? item.endTimeMs : 0) < devMs)
+    const maxPastEnd = pastItems.length > 0 ? Math.max(...pastItems.map((i) => i.endTimeMs != null ? i.endTimeMs : 0)) : 0
+    const newHasFutureOnly = recordsToMap.length > 0 && (recordsToMap[0].startTime != null ? recordsToMap[0].startTime : 0) >= devMs
+    if (pastItems.length > 0 && newHasFutureOnly) {
+      const pastRaw = pastItems.map((item) => ({
+        startTime: item.startTimeMs,
+        endTime: item.endTimeMs,
+        name: item.title,
+        type: item.recordType === 'song' ? 'song' : (item.recordType === 'ad' ? 'ad' : (item.recordType === 'specialAd' ? 'specialAd' : 'stockAd')),
+        id: item.recordType === 'song' ? item.id : 'rec-' + item.recordType + '-' + (item.id || '') + '-' + (item.startTimeMs || 0),
+        album: item.artworkUrl ? { coverUrl: item.artworkUrl, name: item.artist } : null,
+        audio: item.audio || null,
+        coverUrl: item.artworkUrl || null
+      }))
+      recordsToMap = pastRaw.concat(recordsToMap.filter((r) => (r.startTime != null ? r.startTime : 0) >= maxPastEnd))
+    }
+  }
+  const mergedPlaylist = recordsToMap.map((record) => {
     const startMs = record.startTime != null ? record.startTime : 0
     const endMs = record.endTime != null ? record.endTime : (startMs + (record.audio && record.audio.duration ? record.audio.duration : 0))
     const durationSec = (record.audio && record.audio.duration) ? record.audio.duration / 1000 : 0
@@ -80,20 +120,19 @@ function snapshotToPlayerState(system, playback, playlist, ad, specialAd, stockA
     }
   })
 
-  // Şu an çalan: VP'nin activeRecord'ına göre indeks (zaman aralığı yerine kayıt eşleşmesi)
-  let mergedCurrentIndex = -1
-  if (rec) {
+  let mergedCurrentIndex = deviceTimeRecordIndex >= 0 ? deviceTimeRecordIndex : -1
+  if (mergedCurrentIndex < 0 && rec) {
     for (let i = 0; i < mergedPlaylist.length; i++) {
       const item = mergedPlaylist[i]
       const matchBySong = rec.type === 'song' && item.recordType === 'song' && String(item.id) === String(rec.id)
-      const matchBySlot = rec.type !== 'song' && item.recordType === rec.type && item.startTimeMs === rec.startTime
+      const matchBySlot = rec.type !== 'song' && item.recordType === rec.type && item.startTimeMs === (rec.startTime != null ? rec.startTime : 0)
       if (matchBySong || matchBySlot) {
         mergedCurrentIndex = i
         break
       }
     }
   }
-  if (mergedCurrentIndex < 0 && mergedPlaylist.length > 0 && currentTimeMs >= mergedPlaylist[mergedPlaylist.length - 1].endTimeMs) {
+  if (mergedCurrentIndex < 0 && mergedPlaylist.length > 0 && devMs >= mergedPlaylist[mergedPlaylist.length - 1].endTimeMs) {
     mergedCurrentIndex = mergedPlaylist.length - 1
   }
   if (mergedCurrentIndex < 0 && mergedPlaylist.length > 0) mergedCurrentIndex = 0
@@ -163,6 +202,50 @@ function getUpcomingSchedule(player) {
   }
 }
 
+/** Playlist/reklam programları değişmediğinde önbellek kullan – fastForwardTo(DAY) ana thread'i bloke ediyor */
+let _scheduleCacheKey = null
+let _scheduleCache = null
+let _scheduleCacheTime = 0
+const CACHE_TTL_MS = 3 * 60 * 1000 // 3 dk – yeni reklam/playlist için otomatik yenileme
+function getUpcomingScheduleCached(player) {
+  const now = Date.now()
+  if (_scheduleCacheTime && now - _scheduleCacheTime > CACHE_TTL_MS) {
+    _scheduleCacheKey = null
+    _scheduleCache = null
+  }
+  const sys = player.state.system.snapshot()
+  const playlist = player.state.controllers.playlist?.state?.snapshot()
+  const ad = player.state.controllers.ad?.state?.snapshot()
+  const specialAd = player.state.controllers.specialAd?.state?.snapshot()
+  const stockAd = player.state.controllers.stockAd?.state?.snapshot()
+  const pl = sys.activePlaylist || playlist?.activePlaylist
+  const key = [
+    pl?.id,
+    (pl?.songs || []).length,
+    (playlist?.playlists || []).length,
+    (playlist?.userPlaylists || []).length,
+    (ad?.schedules || []).length,
+    (specialAd?.schedules || []).length,
+    (stockAd?.schedules || []).length
+  ].join('|')
+  if (key === _scheduleCacheKey && Array.isArray(_scheduleCache)) return _scheduleCache
+  _scheduleCacheKey = key
+  _scheduleCache = getUpcomingSchedule(player)
+  _scheduleCacheTime = now
+  return _scheduleCache
+}
+function invalidateScheduleCache() {
+  _scheduleCacheKey = null
+  _scheduleCache = null
+  _scheduleCacheTime = 0
+}
+
+function getDeviceTimeMs() {
+  if (typeof Date === 'undefined') return 0
+  const now = new Date()
+  return now.getHours() * 3600000 + now.getMinutes() * 60000 + now.getSeconds() * 1000 + now.getMilliseconds()
+}
+
 async function initVirtualPlayer(userId) {
   if (!userId) return Promise.reject(new Error('userId gerekli'))
 
@@ -204,6 +287,10 @@ async function initVirtualPlayer(userId) {
     window.virtualPlayer = player
     window.state = player.state
     window.requestVPSync = syncState
+    window.requestVPRefresh = function () {
+      invalidateScheduleCache()
+      syncState()
+    }
   }
 
   // VP akışı: sadece parça değişince activerecord gönder. Her state tick'te göndermek play() kesintisine yol açar.
@@ -216,9 +303,10 @@ async function initVirtualPlayer(userId) {
     const ad = player.state.controllers.ad ? player.state.controllers.ad.state.snapshot() : null
     const specialAd = player.state.controllers.specialAd ? player.state.controllers.specialAd.state.snapshot() : null
     const stockAd = player.state.controllers.stockAd ? player.state.controllers.stockAd.state.snapshot() : null
-    const upcomingSchedule = getUpcomingSchedule(player)
+    const upcomingSchedule = getUpcomingScheduleCached(player)
+    const deviceTimeMs = getDeviceTimeMs()
 
-    const next = snapshotToPlayerState(sys, playback, playlist, ad, specialAd, stockAd, upcomingSchedule)
+    const next = snapshotToPlayerState(sys, playback, playlist, ad, specialAd, stockAd, upcomingSchedule, deviceTimeMs)
     if (typeof window !== 'undefined' && window.playerState) {
       Object.assign(window.playerState, next)
     }
@@ -236,10 +324,9 @@ async function initVirtualPlayer(userId) {
         const curIdx = next.currentTrackIndex >= 0 ? next.currentTrackIndex : 0
         const pl = next.playlist || []
         const artworkUrl = (rec.album && rec.album.coverUrl) || (pl[curIdx] && pl[curIdx].artworkUrl) || null
-        const currentTimeMs = sys.currentTime != null ? sys.currentTime : 0
-        const currentOffset = Math.max(0, (currentTimeMs - rec.startTime) / 1000)
-        // Referans (audio.js): cihaz saati ile startTimeMs/durationMs kullanılıyor; renderer aynı mantıkla seek yapacak
-        const startTimeMs = rec.startTime
+        const startTimeMs = rec.startTime != null ? rec.startTime : 0
+        const currentOffset = Math.max(0, (deviceTimeMs - startTimeMs) / 1000)
+        // Cihaz saati ms → parça içindeki offset; renderer aynı mantıkla başlatır
         const durationMs = (rec.audio && rec.audio.duration) ? rec.audio.duration : 0
         window.dispatchEvent(new CustomEvent('virtualplayer-activerecord', {
           detail: {
@@ -267,6 +354,7 @@ async function initVirtualPlayer(userId) {
   player.state.controllers.playback.state.subscribe(playbackSelector, syncState, { notifyInSync: true })
   if (player.state.controllers.playlist && player.state.controllers.playlist.state) {
     player.state.controllers.playlist.state.subscribe((s) => s.activePlaylist, syncState, { notifyInSync: true })
+    player.state.controllers.playlist.state.subscribe((s) => (s.playlists && s.playlists.length) || 0, syncState, { notifyInSync: true })
   }
   if (player.state.controllers.ad && player.state.controllers.ad.state) {
     player.state.controllers.ad.state.subscribe((s) => (s.schedules && s.schedules.length) || 0, syncState, { notifyInSync: true })
@@ -281,6 +369,13 @@ async function initVirtualPlayer(userId) {
   // Referans (React): periyodik fastForwardTo yok; VP startRealtimeSimulation() içinde tek sefer getLocalTime() % DAY’e sarıyor, sonra setTimeout ile senkron kalıyor.
   return player.readyPromise.then(() => {
     syncState()
+    setTimeout(syncState, 500)
+    setTimeout(syncState, 1500)
+    setInterval(syncState, 1000)
+    setInterval(function () {
+      invalidateScheduleCache()
+      syncState()
+    }, 3 * 60 * 1000)
     return player
   })
 }

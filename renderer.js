@@ -135,8 +135,8 @@
         var cur = Object.assign({}, s.playlist[fullIndex], { fullIndex: fullIndex });
         var before = s.playlist.slice(0, fullIndex).map(function (item, i) { return Object.assign({}, item, { fullIndex: i }); });
         var after = s.playlist.slice(fullIndex + 1).map(function (item, i) { return Object.assign({}, item, { fullIndex: fullIndex + 1 + i }); });
-        list = [cur].concat(before).concat(after);
-        currentIndexInList = 0;
+        list = before.concat([cur]).concat(after);
+        currentIndexInList = fullIndex;
       } else {
         s.playlist.forEach(function (item, i) {
           list.push(Object.assign({}, item, { fullIndex: i }));
@@ -151,8 +151,12 @@
         }
       });
     } else {
+      var seenIds = new Set();
       s.playlist.forEach(function (item, i) {
         if (item.recordType === 'song' && likedSet.has(String(item.id))) {
+          var id = String(item.id);
+          if (seenIds.has(id)) return;
+          seenIds.add(id);
           list.push(Object.assign({}, item, { fullIndex: i }));
           if (currentItem && currentItem.id === item.id) currentIndexInList = list.length - 1;
         }
@@ -177,9 +181,9 @@
       } else if (view === 'ads') {
         countEl.style.display = 'none';
       } else {
-        var n = 0;
-        s.playlist.forEach(function (item) { if (item.recordType === 'song' && likedSet.has(String(item.id))) n++; });
-        countEl.textContent = String(n) + ' beğeni';
+        var favIds = new Set();
+        s.playlist.forEach(function (item) { if (item.recordType === 'song' && likedSet.has(String(item.id))) favIds.add(String(item.id)); });
+        countEl.textContent = String(favIds.size) + ' beğeni';
         countEl.style.display = '';
       }
     }
@@ -244,8 +248,8 @@
       renderPlaylist(center.list, center.currentIndexInList);
     }
 
-    // Yayın gerçekten çalıyor mu? (ses açık ve geçerli parça var)
-    var streamActive = !!(s.isPlaying && s.activeRecord && s.activeRecord.audio && s.activeRecord.audio.url);
+    // Yayın akışı bu saatte var mı? (activeRecord = şu anki slot; pause olsa bile yayın vardır)
+    var streamActive = !!(s.activeRecord && s.activeRecord.audio && s.activeRecord.audio.url);
 
     // Şu an çalınan + alt bar: VP'den gelen activeRecord kullan (yanlışlıkla sıradaki değil, gerçekten çalan)
     var track = null;
@@ -315,35 +319,42 @@
       if (playerArtImg) playerArtImg.style.display = 'none';
     }
 
-    // Üst bar butonu: yayın varken Çalınıyor/Duraklatıldı, yokken Yayın yok
+    // Üst bar butonu: yayın varken Çalınıyor/Duraklatıldı, yokken Yayın yok (mutedByPause = kullanıcı duraklattı)
     const btnNowPlaying = document.getElementById('btn-now-playing-state');
     const btnPlayingText = document.getElementById('btn-playing-text');
-    if (btnPlayingText) btnPlayingText.textContent = streamActive ? (s.isPlaying ? 'Çalınıyor' : 'Duraklatıldı') : 'Yayın yok';
+    if (btnPlayingText) btnPlayingText.textContent = streamActive ? (s.mutedByPause ? 'Duraklatıldı' : 'Çalınıyor') : 'Yayın yok';
     if (btnNowPlaying) {
-      btnNowPlaying.classList.toggle('paused', !streamActive || !s.isPlaying);
+      btnNowPlaying.classList.toggle('paused', !streamActive || s.mutedByPause);
       btnNowPlaying.classList.toggle('stream-off', !streamActive);
     }
     const btnPlay = document.getElementById('btn-play');
     if (btnPlay) {
       const sym = btnPlay.querySelector('.ctrl-play-symbol');
-      if (sym) sym.textContent = s.isPlaying ? '⏸' : '▶';
+      if (sym) sym.textContent = s.mutedByPause ? '▶' : '⏸';
     }
     var volPct = document.getElementById('volume-percent');
-    if (volPct) volPct.textContent = (s.mutedByPause ? 0 : s.volume) + '%';
+    if (volPct) volPct.textContent = (s.mutedByPause ? s.savedVolumeBeforeMute : s.volume) + '%';
 
-    // İlerleme
+    // İlerleme: oynatma sırasında sadece appAudio.currentTime kullan (VP state ile çakışma olmasın)
     const curEl = document.getElementById('progress-current');
     const totEl = document.getElementById('progress-total');
     const fillEl = document.getElementById('progress-fill');
-    if (curEl) curEl.textContent = formatTime(s.currentTime);
-    if (totEl) totEl.textContent = formatTime(s.duration);
-    if (fillEl) fillEl.style.width = (s.duration > 0 ? (s.currentTime / s.duration) * 100 : 0) + '%';
+    var displayCurrent = s.currentTime;
+    var displayDuration = s.duration;
+    if (appAudio && appAudio.src) {
+      var at = appAudio.currentTime;
+      if (!isNaN(at) && at >= 0) displayCurrent = at;
+      displayDuration = (window._trackDurationSec != null ? window._trackDurationSec : (appAudio.duration && !isNaN(appAudio.duration) ? appAudio.duration : s.duration)) || s.duration;
+    }
+    if (curEl) curEl.textContent = formatTime(displayCurrent);
+    if (totEl) totEl.textContent = formatTime(displayDuration);
+    if (fillEl) fillEl.style.width = (displayDuration > 0 ? (displayCurrent / displayDuration) * 100 : 0) + '%';
 
     // Reklam sayısı
     const adsCountEl = document.getElementById('ads-count');
     if (adsCountEl) adsCountEl.textContent = s.ads.length + ' Anons';
     var volSlider = document.getElementById('volume');
-    if (volSlider && !window.playerState.mutedByPause) volSlider.value = window.playerState.volume;
+    if (volSlider) volSlider.value = s.mutedByPause ? s.savedVolumeBeforeMute : s.volume;
 
     // Sağ panel reklam listesi (eski format) - sadece değiştiyse çiz
     var adsKey = (s.ads && s.ads.length) ? s.ads.length + '-' + (s.ads[0] && s.ads[0].num) + '-' + (s.ads[s.ads.length - 1] && s.ads[s.ads.length - 1].num) : '0';
@@ -447,6 +458,10 @@
     el.querySelectorAll('.btn-dislike').forEach(function (btn) {
       btn.addEventListener('click', function (e) { e.stopPropagation(); this.classList.toggle('disliked'); this.closest('li').querySelector('.btn-like').classList.remove('liked'); });
     });
+    var playingLi = currentIndex >= 0 ? el.querySelector('.track-item.playing') : null;
+    if (playingLi && typeof playingLi.scrollIntoView === 'function') {
+      playingLi.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
   function renderAds(ads) {
@@ -486,6 +501,20 @@
       var center = getCenterList(window.playerState);
       renderPlaylist(center.list, center.currentIndexInList);
     });
+  });
+
+  document.getElementById('settings-refresh-playlist')?.addEventListener('click', function () {
+    if (window.requestVPRefresh) window.requestVPRefresh();
+    var ind = document.getElementById('playlist-update-indicator');
+    if (ind) {
+      ind.setAttribute('aria-hidden', 'false');
+      if (window._playlistUpdateHideTimer) clearTimeout(window._playlistUpdateHideTimer);
+      window._playlistUpdateHideTimer = setTimeout(function () {
+        window._playlistUpdateHideTimer = null;
+        var i = document.getElementById('playlist-update-indicator');
+        if (i) i.setAttribute('aria-hidden', 'true');
+      }, 2500);
+    }
   });
 
   // Cihaz saati: sadece bu zamanlayıcı günceller (saniyede bir, ekstra yük yok)
@@ -529,8 +558,6 @@
         window.virtualPlayer.state.controllers.playback.setDesiredVolume(0);
       }
       if (appAudio) appAudio.volume = 0;
-      var volEl2 = document.getElementById('volume');
-      if (volEl2) volEl2.value = 0;
       s.isPlaying = false;
     }
     updateUIFromState();
@@ -673,20 +700,13 @@
     if (e.detail && window.playerState) {
       var pl = e.detail.playlist;
       var plSig = pl && pl.length ? pl.length + '-' + (pl[0] && pl[0].id) + '-' + (pl[pl.length - 1] && pl[pl.length - 1].id) : '';
-      var playlistChanged = plSig && window._lastPlaylistSignature !== undefined && window._lastPlaylistSignature !== plSig;
-      if (playlistChanged) {
-        var ind = document.getElementById('playlist-update-indicator');
-        if (ind) {
-          ind.setAttribute('aria-hidden', 'false');
-          if (window._playlistUpdateHideTimer) clearTimeout(window._playlistUpdateHideTimer);
-          window._playlistUpdateHideTimer = setTimeout(function () {
-            window._playlistUpdateHideTimer = null;
-            if (ind) ind.setAttribute('aria-hidden', 'true');
-          }, 8000);
-        }
-      }
       if (plSig !== undefined) window._lastPlaylistSignature = plSig;
       if (!window._playlistDataReceived) window._playlistDataReceived = true;
+      if (!pl || pl.length === 0) {
+        var indEmpty = document.getElementById('playlist-update-indicator');
+        if (indEmpty) indEmpty.setAttribute('aria-hidden', 'true');
+        if (window._playlistUpdateHideTimer) { clearTimeout(window._playlistUpdateHideTimer); window._playlistUpdateHideTimer = null; }
+      }
       if (window.playerState.mutedByPause && e.detail.volume != null) e.detail.volume = 0;
       Object.assign(window.playerState, e.detail);
       updateUIFromState();
@@ -714,6 +734,7 @@
       try {
         var d = e.detail;
         if (!d || !d.url) {
+          window._trackDurationSec = null;
           activeRecordLoadId++;
           appAudio.pause();
           appAudio.removeAttribute('src');
@@ -724,7 +745,7 @@
         var thisLoadId = ++activeRecordLoadId;
         var startTimeMs = d.startTimeMs != null ? Number(d.startTimeMs) : null;
         var durationMs = d.durationMs != null ? Number(d.durationMs) : 0;
-        var startOffset;
+        var startOffset = 0;
         if (startTimeMs != null && durationMs > 0) {
           var nowMs = getCurrentTimeInMilliseconds();
           var elapsedMs = nowMs - startTimeMs;
@@ -737,9 +758,10 @@
             return;
           }
           startOffset = elapsedMs > 0 ? Math.min(elapsedMs / 1000, durationMs / 1000) : 0;
-        } else {
-          startOffset = (d.currentOffset != null && !isNaN(d.currentOffset)) ? Math.max(0, d.currentOffset) : 0;
+        } else if (d.currentOffset != null && !isNaN(d.currentOffset)) {
+          startOffset = Math.max(0, d.currentOffset);
         }
+        window._trackDurationSec = d.duration != null && !isNaN(d.duration) ? Number(d.duration) : null;
         appAudio.src = d.url;
         var vol = (window.playerState && window.playerState.volume != null) ? window.playerState.volume / 100 : 1;
         if (window.playerState && window.playerState.mutedByPause) vol = 0;
@@ -780,10 +802,6 @@
       }
     });
     window.addEventListener('virtualplayer-state', function (e) {
-      if (e.detail && e.detail.currentTime != null && appAudio.src) {
-        var t = e.detail.currentTime;
-        if (Math.abs(appAudio.currentTime - t) > 1) appAudio.currentTime = t;
-      }
       if (e.detail && e.detail.volume != null && !(window.playerState && window.playerState.mutedByPause))
         appAudio.volume = e.detail.volume / 100;
     });
@@ -798,8 +816,9 @@
       var totEl = document.getElementById('progress-total');
       var fillEl = document.getElementById('progress-fill');
       if (curEl) curEl.textContent = formatTime(appAudio.currentTime);
-      if (totEl) totEl.textContent = formatTime(appAudio.duration);
-      if (fillEl) fillEl.style.width = (appAudio.duration > 0 ? (appAudio.currentTime / appAudio.duration) * 100 : 0) + '%';
+      var dur = window._trackDurationSec != null ? window._trackDurationSec : (appAudio.duration && !isNaN(appAudio.duration) ? appAudio.duration : 0);
+      if (totEl) totEl.textContent = formatTime(dur);
+      if (fillEl) fillEl.style.width = (dur > 0 ? (appAudio.currentTime / dur) * 100 : 0) + '%';
     });
     // Referans (audio.js): onend sadece playerState = 'idle'. Geçişi VP realtime simulation yapar; advance() → activeRecord değişir → abonelik syncState → activerecord dispatch.
     appAudio.addEventListener('ended', function () {

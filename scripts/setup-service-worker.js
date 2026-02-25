@@ -10,8 +10,6 @@ const appRoot = path.resolve(__dirname, '..');
 const vpDist = path.join(appRoot, 'node_modules', '@ai-music-corp', 'virtual-player', 'dist');
 const swSource = path.join(vpDist, 'file-cache-manager-sw.js');
 const swDest = path.join(appRoot, 'file-cache-manager-sw.js');
-const mapSource = path.join(vpDist, 'file-cache-manager-sw.js.map');
-const mapDest = path.join(appRoot, 'file-cache-manager-sw.js.map');
 
 if (!fs.existsSync(swSource)) {
   console.error('Service worker kaynağı bulunamadı:', swSource);
@@ -21,13 +19,11 @@ if (!fs.existsSync(swSource)) {
 
 fs.copyFileSync(swSource, swDest);
 let swContent = fs.readFileSync(swDest, 'utf8');
-if (swContent.includes('sourceMappingURL=')) {
-  swContent = swContent.replace(/\n?\/\/# sourceMappingURL=.*$/m, '');
+// Source map referansini kaldir; .map dosyasi paketlenmez, 404 uyarisi olmasin
+if (swContent.includes('sourceMappingURL') || swContent.includes('sourceMappingURL=')) {
+  swContent = swContent.replace(/\n?\/\/#\s*sourceMappingURL=.*$/m, '').trimEnd();
   fs.writeFileSync(swDest, swContent);
 }
-console.log('Service worker kopyalandı:', swDest);
-if (fs.existsSync(mapSource)) {
-  fs.copyFileSync(mapSource, mapDest);
-  console.log('Source map kopyalandı:', mapDest);
-}
-console.log('Uygulama çalıştığında /file-cache-manager-sw.js olarak sunulacak.');
+console.log('Service worker kopyalandi:', swDest);
+// .map kopyalama; DevTools 404 vermesin
+console.log('Uygulama calistiginda /file-cache-manager-sw.js olarak sunulacak.');

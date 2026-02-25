@@ -31,7 +31,7 @@ if errorlevel 1 (
 echo.
 echo ========================================
 echo   Tamamlandi.
-echo   Kurulum dosyasi: dist\AI Music Player Setup 1.0.0.exe
+echo   Kurulum dosyasi: dist\AI Music Player Setup 1.x.x.exe
 echo ========================================
 echo.
 pause

@@ -47,5 +47,5 @@ Repoda **Settings → Secrets and variables → Actions** altında şu secret’
 
 ## Workflow Dosyaları
 
-- `.github/workflows/release-publish.yml` — Manuel tetikle: sürüm günceller, tag + release oluşturur (tek tıkla release).
+- `.github/workflows/release-publish.yml` — Manuel tetikle (Release: Create and Publish): sürüm günceller, tag + release oluşturur (tek tıkla release).
 - `.github/workflows/release-r2.yml` — Release yayınlandığında tetiklenir, build alır ve R2’ye yükler.

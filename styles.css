@@ -36,9 +36,10 @@
   --slider-thumb: #1a1a1a;
 }
 
-/* Koyu tema: kaydırma çubukları */
+/* Koyu tema: kaydırma çubukları (çalma listesi + reklamlarım aynı stil) */
 [data-theme="dark"] .playlist-section,
 [data-theme="dark"] .playlist-list-wrap,
+[data-theme="dark"] .playlist,
 [data-theme="dark"] .ads-list,
 [data-theme="dark"] .sidebar {
   scrollbar-width: thin;
@@ -46,6 +47,7 @@
 }
 [data-theme="dark"] .playlist-section::-webkit-scrollbar,
 [data-theme="dark"] .playlist-list-wrap::-webkit-scrollbar,
+[data-theme="dark"] .playlist::-webkit-scrollbar,
 [data-theme="dark"] .ads-list::-webkit-scrollbar,
 [data-theme="dark"] .sidebar::-webkit-scrollbar {
   width: 8px;
@@ -53,6 +55,7 @@
 }
 [data-theme="dark"] .playlist-section::-webkit-scrollbar-track,
 [data-theme="dark"] .playlist-list-wrap::-webkit-scrollbar-track,
+[data-theme="dark"] .playlist::-webkit-scrollbar-track,
 [data-theme="dark"] .ads-list::-webkit-scrollbar-track,
 [data-theme="dark"] .sidebar::-webkit-scrollbar-track {
   background: #1e1e1e;
@@ -60,6 +63,7 @@
 }
 [data-theme="dark"] .playlist-section::-webkit-scrollbar-thumb,
 [data-theme="dark"] .playlist-list-wrap::-webkit-scrollbar-thumb,
+[data-theme="dark"] .playlist::-webkit-scrollbar-thumb,
 [data-theme="dark"] .ads-list::-webkit-scrollbar-thumb,
 [data-theme="dark"] .sidebar::-webkit-scrollbar-thumb {
   background: #404040;
@@ -67,14 +71,16 @@
 }
 [data-theme="dark"] .playlist-section::-webkit-scrollbar-thumb:hover,
 [data-theme="dark"] .playlist-list-wrap::-webkit-scrollbar-thumb:hover,
+[data-theme="dark"] .playlist::-webkit-scrollbar-thumb:hover,
 [data-theme="dark"] .ads-list::-webkit-scrollbar-thumb:hover,
 [data-theme="dark"] .sidebar::-webkit-scrollbar-thumb:hover {
   background: #505050;
 }
 
-/* Açık tema: kaydırma çubukları */
+/* Açık tema: kaydırma çubukları (çalma listesi + reklamlarım aynı stil) */
 [data-theme="light"] .playlist-section,
 [data-theme="light"] .playlist-list-wrap,
+[data-theme="light"] .playlist,
 [data-theme="light"] .ads-list,
 [data-theme="light"] .sidebar {
   scrollbar-width: thin;
@@ -82,6 +88,7 @@
 }
 [data-theme="light"] .playlist-section::-webkit-scrollbar,
 [data-theme="light"] .playlist-list-wrap::-webkit-scrollbar,
+[data-theme="light"] .playlist::-webkit-scrollbar,
 [data-theme="light"] .ads-list::-webkit-scrollbar,
 [data-theme="light"] .sidebar::-webkit-scrollbar {
   width: 8px;
@@ -89,6 +96,7 @@
 }
 [data-theme="light"] .playlist-section::-webkit-scrollbar-track,
 [data-theme="light"] .playlist-list-wrap::-webkit-scrollbar-track,
+[data-theme="light"] .playlist::-webkit-scrollbar-track,
 [data-theme="light"] .ads-list::-webkit-scrollbar-track,
 [data-theme="light"] .sidebar::-webkit-scrollbar-track {
   background: #f0f0f0;
@@ -96,6 +104,7 @@
 }
 [data-theme="light"] .playlist-section::-webkit-scrollbar-thumb,
 [data-theme="light"] .playlist-list-wrap::-webkit-scrollbar-thumb,
+[data-theme="light"] .playlist::-webkit-scrollbar-thumb,
 [data-theme="light"] .ads-list::-webkit-scrollbar-thumb,
 [data-theme="light"] .sidebar::-webkit-scrollbar-thumb {
   background: #c0c0c0;
@@ -103,6 +112,7 @@
 }
 [data-theme="light"] .playlist-section::-webkit-scrollbar-thumb:hover,
 [data-theme="light"] .playlist-list-wrap::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] .playlist::-webkit-scrollbar-thumb:hover,
 [data-theme="light"] .ads-list::-webkit-scrollbar-thumb:hover,
 [data-theme="light"] .sidebar::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
@@ -115,6 +125,7 @@
 }
 
 html, body {
+  width: 100%;
   height: 100%;
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   background: var(--bg-main);
@@ -129,7 +140,9 @@ html, body {
   grid-template-areas:
     "sidebar main ads"
     "player player player";
+  width: 100%;
   height: 100vh;
+  min-height: 0;
 }
 
 /* ========== Sol Sidebar ========== */
@@ -338,6 +351,8 @@ html, body {
 /* ========== Ana İçerik ========== */
 .main-content {
   grid-area: main;
+  min-width: 0;
+  width: 100%;
   padding: 24px 32px;
   display: flex;
   flex-direction: column;
@@ -346,10 +361,14 @@ html, body {
 }
 .now-playing-card {
   flex-shrink: 0;
+  width: 100%;
+  max-width: 100%;
 }
 .playlist-section {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   margin-top: 8px;
@@ -359,8 +378,12 @@ html, body {
 .playlist-list-wrap {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
 }
 
 /* ========== Üst: Şu an çalınıyor bar (referans 1) ========== */
@@ -584,6 +607,9 @@ html, body {
 
 .playlist {
   list-style: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .playlist li {
@@ -762,6 +788,7 @@ html, body {
 /* ========== Reklamlarım (referans 4) ========== */
 .ads-panel {
   grid-area: ads;
+  min-width: 0;
   background: var(--bg-bars);
   border-left: 1px solid var(--border);
   display: flex;
@@ -1169,6 +1196,21 @@ html, body {
   outline: none;
 }
 
+.settings-refresh-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  background: transparent;
+  border: 1px solid var(--accent-blue);
+  border-radius: 8px;
+  color: var(--accent-blue);
+  cursor: pointer;
+}
+
+.settings-refresh-btn:hover {
+  background: var(--accent-blue);
+  color: #fff;
+}
+
 .settings-version {
   display: flex;
   align-items: center;
@@ -1302,23 +1344,22 @@ html, body {
 }
 
 /* ========== Çalma listesi yükleme animasyonu ========== */
+/* Overlay değil, akışta yer alır; tıklamayı engellemez (pointer-events: none) */
 .playlist-loading {
-  position: absolute;
-  inset: 0;
   display: flex;
+  flex: 1;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 16px;
-  background: var(--bg-main);
-  z-index: 2;
+  padding: 40px 20px;
+  min-height: 200px;
+  pointer-events: none;
   transition: opacity 0.25s ease, visibility 0.25s ease;
 }
 
 .playlist-loading[aria-hidden="true"] {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
+  display: none;
 }
 
 .playlist-loading-spinner {
