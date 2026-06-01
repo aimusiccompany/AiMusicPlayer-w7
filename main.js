@@ -138,7 +138,7 @@ function handleFatalError(err, source) {
       res = dialog.showMessageBoxSync(mainWindow || null, {
         type: 'error',
         title: 'Kritik hata',
-        message: 'Beklenmedik bir hata oluştu. Uygulama yeniden başlatılabilir.',
+        message: 'Beklenmedik bir hata olustu. Uygulama yeniden baslatilabilir.',
         detail: e.message || '',
         buttons: ['Yeniden başlat', 'Kapat'],
         defaultId: 0,
@@ -204,7 +204,7 @@ function createWindow() {
     if (isQuitting) return;
     rendererCrashCount++;
     if (rendererCrashCount >= 3) {
-      dialog.showErrorBox('Kritik hata', 'Uygulama görüntüleme motoru beklenmedik şekilde kapandı. Uygulama kapatılıyor.');
+      dialog.showErrorBox('Kritik hata', 'Uygulama goruntuleme motoru beklenmedik sekilde kapandi. Uygulama kapatiliyor.');
       app.quit();
       return;
     }
@@ -217,9 +217,9 @@ function createWindow() {
     if (isQuitting) return;
     dialog.showMessageBox(mainWindow, {
       type: 'warning',
-      title: 'Uygulama yanıt vermiyor',
-      message: 'Uygulama yanıt vermiyor. Yeniden yüklemek ister misiniz?',
-      buttons: ['Bekle', 'Yeniden yükle'],
+      title: 'Uygulama yanit vermiyor',
+      message: 'Uygulama yanit vermiyor. Yeniden yuklemek ister misiniz?',
+      buttons: ['Bekle', 'Yeniden yukle'],
       defaultId: 0,
       cancelId: 0,
     }).then((res) => {
@@ -250,16 +250,23 @@ function setOpenAtLogin() {
 }
 
 // Otomatik güncelleme: sadece paketlenmiş (yayınlanmış) sürümde çalışır; güncelleme sunucusundan yeni sürüm varsa indirir ve kullanıcı onayıyla kurar.
-// Güncelleme adresi package.json → build.publish[].url (generic sunucu). Yayın için: npm run dist sonrası dist/ içindeki .exe ve latest.yml dosyasını bu URL’e yükleyin.
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
   let autoUpdater;
   try {
     autoUpdater = require('electron-updater').autoUpdater;
   } catch (e) {
-    console.warn('electron-updater yüklenemedi, güncelleme devre dışı:', e.message);
+    console.warn('electron-updater yuklenemedi, guncelleme devre disi:', e.message);
     return;
   }
+
+  // Güncelleme kaynağının GitHub Releases olduğunu ve hedef repoyu doğrudan koda deklare ediyoruz
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: 'aimusiccompany',
+    repo: 'AiMusicPlayer-w7'
+  });
+
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
@@ -272,8 +279,8 @@ function setupAutoUpdater() {
   autoUpdater.on('update-downloaded', (info) => {
     const opts = {
       type: 'info',
-      title: 'Güncelleme hazır',
-      message: 'Yeni sürüm indirildi (v' + (info && info.version ? info.version : '') + '). Uygulamayı şimdi yeniden başlatarak güncellemeyi uygulayabilirsiniz.',
+      title: 'Guncelleme hazir',
+      message: 'Yeni surum indirildi (v' + (info && info.version ? info.version : '') + '). Uygulamayi simdi yeniden baslatarak guncellemeyi uygulayabilirsiniz.',
       buttons: ['Yeniden başlat', 'Daha sonra'],
     };
     dialog.showMessageBox(mainWindow || null, opts).then((res) => {
@@ -282,10 +289,10 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('error', (err) => {
-    console.warn('Güncelleme hatası:', err.message || err);
+    console.warn('Guncelleme hatasi:', err.message || err);
   });
 
-  // Uygulama açıldıktan kısa bir süre sonra güncelleme kontrolü (sunucu hazır olsun diye).
+  // Uygulama açıldıktan 3 saniye sonra sessizce güncelleme kontrolünü başlatır.
   setTimeout(() => {
     autoUpdater.checkForUpdates().catch(() => {});
   }, 3000);
@@ -335,7 +342,7 @@ app.whenReady().then(() => {
   });
 }).catch((err) => {
   console.error('Server start failed:', err);
-  dialog.showErrorBox('Başlatma hatası', 'Yerel sunucu başlatılamadı. Port meşgul olabilir. Uygulama kapatılıyor.');
+  dialog.showErrorBox('Baslatma hatasi', 'Yerel sunucu baslatilamadi. Port mesgul olabilir. Uygulama kapatiliyor.');
   app.quit();
 });
 
