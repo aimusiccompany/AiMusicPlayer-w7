@@ -1,0 +1,4 @@
+--low-ram
+--disable-hwaccel
+--disable-gpu
+--zone=bahce
