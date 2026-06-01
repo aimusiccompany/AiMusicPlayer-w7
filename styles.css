@@ -1381,3 +1381,28 @@ html, body {
   color: var(--text-secondary);
   font-weight: 500;
 }
+
+/* Güncelleme bildirimi toast */
+.update-toast {
+  position: fixed;
+  bottom: 90px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  max-width: 90%;
+  padding: 12px 20px;
+  background: var(--accent-blue);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  z-index: 10000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s, transform 0.3s, visibility 0.3s;
+}
+.update-toast[aria-hidden="false"].update-toast--visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}

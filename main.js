@@ -1,13 +1,164 @@
 const { app, BrowserWindow, ipcMain, globalShortcut, shell, dialog } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const { serve } = require('./server.js');
 
 // Windows 7 / düşük RAM (2–4 GB): Electron 22 ile uyumludur; tek pencereli ve yerel sunucu ile kaynak kullanımı sınırlı tutulur.
 let mainWindow = null;
 let localServer = null;
-let localPort = 2929;
+const args = process.argv.slice(1);
+const zoneArg = args.find((arg) => arg.startsWith('--zone='));
+const zoneNameRaw = zoneArg ? zoneArg.split('=')[1] : 'default';
+const portArg = args.find((arg) => arg.startsWith('--port='));
+const portRaw = portArg ? portArg.split('=')[1] : '';
+const devToolsEnabled = args.includes('--devtools');
+const lowRamMode = args.includes('--low-ram') || args.includes('--disable-hwaccel') || args.includes('--disable-gpu');
+let isQuitting = false;
+let rendererCrashCount = 0;
+
+if (lowRamMode) {
+  app.disableHardwareAcceleration();
+}
+
+function sanitizeZoneName(value) {
+  const v = String(value || '').trim().toLowerCase();
+  const cleaned = v.replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+  return cleaned || 'default';
+}
+
+function isAllowedExternalUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  const u = rawUrl.trim();
+  if (!u || u.length > 2048) return false;
+  let parsed;
+  try {
+    parsed = new URL(u);
+  } catch (_) {
+    return false;
+  }
+  if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return true;
+  if (parsed.protocol === 'mailto:' || parsed.protocol === 'tel:') return true;
+  return false;
+}
+
+function isAllowedIpcSender(event) {
+  const u = event && event.senderFrame && event.senderFrame.url ? String(event.senderFrame.url) : '';
+  return u.startsWith('http://127.0.0.1:');
+}
+
+function getZoneHash(value) {
+  const s = String(value || '');
+  let hash = 5381;
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash << 5) + hash) ^ s.charCodeAt(i);
+  }
+  return Math.abs(hash) >>> 0;
+}
+
+function isValidPort(n) {
+  return Number.isInteger(n) && n >= 1024 && n <= 65535;
+}
+
+const zoneName = sanitizeZoneName(zoneNameRaw);
+const newUserDataPath = path.join(app.getPath('appData'), `MuzikApp-${zoneName}`);
+app.setPath('userData', newUserDataPath);
+
+const parsedPort = parseInt(portRaw, 10);
+let localPort = isValidPort(parsedPort) ? parsedPort : (2929 + (getZoneHash(zoneName) % 100) * 10);
 const pkg = require('./package.json');
 const APP_PATH = __dirname;
+const LOG_DIR = path.join(app.getPath('userData'), 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'main.log');
+const LOG_MAX_SIZE = 2 * 1024 * 1024;
+let isHandlingFatal = false;
+
+function ensureDirSync(dirPath) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+  } catch (_) {}
+}
+
+function rotateLogIfNeeded() {
+  try {
+    const st = fs.statSync(LOG_FILE);
+    if (!st || !st.size || st.size < LOG_MAX_SIZE) return;
+    const rotated = LOG_FILE + '.1';
+    try { fs.unlinkSync(rotated); } catch (_) {}
+    fs.renameSync(LOG_FILE, rotated);
+  } catch (_) {}
+}
+
+function formatLogValue(v) {
+  if (v instanceof Error) return v.stack || v.message || String(v);
+  if (typeof v === 'string') return v;
+  try {
+    return JSON.stringify(v);
+  } catch (_) {
+    return String(v);
+  }
+}
+
+function appendLogLine(level, parts) {
+  try {
+    ensureDirSync(LOG_DIR);
+    rotateLogIfNeeded();
+    const ts = new Date().toISOString();
+    const msg = Array.isArray(parts) ? parts.map(formatLogValue).join(' ') : formatLogValue(parts);
+    fs.appendFileSync(LOG_FILE, ts + ' [' + level + '] ' + msg + '\n', 'utf8');
+  } catch (_) {}
+}
+
+const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+console.error = (...args) => {
+  appendLogLine('error', args);
+  originalConsoleError(...args);
+};
+console.warn = (...args) => {
+  appendLogLine('warn', args);
+  originalConsoleWarn(...args);
+};
+
+function closeLocalServerSafe() {
+  try {
+    if (localServer) localServer.close();
+  } catch (_) {}
+}
+
+function handleFatalError(err, source) {
+  if (isHandlingFatal) return;
+  isHandlingFatal = true;
+  const e = err instanceof Error ? err : new Error(formatLogValue(err));
+  appendLogLine('fatal', [source, e.stack || e.message || String(e)]);
+  closeLocalServerSafe();
+  isQuitting = true;
+  if (app.isReady()) {
+    let res = 1;
+    try {
+      res = dialog.showMessageBoxSync(mainWindow || null, {
+        type: 'error',
+        title: 'Kritik hata',
+        message: 'Beklenmedik bir hata oluştu. Uygulama yeniden başlatılabilir.',
+        detail: e.message || '',
+        buttons: ['Yeniden başlat', 'Kapat'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      });
+    } catch (_) {}
+    if (res === 0) {
+      try { app.relaunch(); } catch (_) {}
+    }
+    try { app.exit(1); } catch (_) {}
+    return;
+  }
+  try { app.exit(1); } catch (_) {}
+}
+
+process.on('uncaughtException', (err) => handleFatalError(err, 'uncaughtException'));
+process.on('unhandledRejection', (reason) => handleFatalError(reason, 'unhandledRejection'));
+
+appendLogLine('info', ['start', 'zone=' + zoneName, 'port=' + String(localPort), 'lowRamMode=' + String(lowRamMode)]);
 
 // Tek örnek: Uygulama zaten açıksa veya arka planda çalışıyorsa ikinci açılış iptal edilir, mevcut pencere öne getirilir (EADDRINUSE hatası önlenir).
 const gotTheLock = app.requestSingleInstanceLock();
@@ -39,7 +190,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    title: 'AI Music Player',
+    title: 'AI Music Player - ' + zoneName,
     backgroundColor: '#121212',
     show: false,
   });
@@ -48,6 +199,33 @@ function createWindow() {
 
   mainWindow.loadURL(getAppUrl('login.html'));
   mainWindow.once('ready-to-show', () => mainWindow.show());
+
+  mainWindow.webContents.on('render-process-gone', (_, details) => {
+    if (isQuitting) return;
+    rendererCrashCount++;
+    if (rendererCrashCount >= 3) {
+      dialog.showErrorBox('Kritik hata', 'Uygulama görüntüleme motoru beklenmedik şekilde kapandı. Uygulama kapatılıyor.');
+      app.quit();
+      return;
+    }
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload();
+    }, 600);
+  });
+
+  mainWindow.on('unresponsive', () => {
+    if (isQuitting) return;
+    dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: 'Uygulama yanıt vermiyor',
+      message: 'Uygulama yanıt vermiyor. Yeniden yüklemek ister misiniz?',
+      buttons: ['Bekle', 'Yeniden yükle'],
+      defaultId: 0,
+      cancelId: 0,
+    }).then((res) => {
+      if (res.response === 1 && mainWindow && !mainWindow.isDestroyed()) mainWindow.reload();
+    }).catch(() => {});
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -130,13 +308,25 @@ ipcMain.handle('navigate-to-login', (_, fromLogout) => {
 });
 
 ipcMain.handle('open-external', (_, url) => {
-  if (url && typeof url === 'string') {
-    shell.openExternal(url).catch(() => {});
-  }
+  if (!isAllowedIpcSender(_)) return;
+  if (!isAllowedExternalUrl(url)) return;
+  shell.openExternal(String(url).trim()).catch(() => {});
 });
 
+function serveWithPorts(ports, index) {
+  const port = ports[index];
+  return serve(APP_PATH, port).then((server) => {
+    localPort = port;
+    return server;
+  }).catch((err) => {
+    if (index + 1 >= ports.length) throw err;
+    return serveWithPorts(ports, index + 1);
+  });
+}
+
 app.whenReady().then(() => {
-  return serve(APP_PATH, localPort).then((server) => {
+  const portsToTry = [localPort, localPort + 1, localPort + 2].filter((p) => p <= 65535);
+  return serveWithPorts(portsToTry, 0).then((server) => {
     localServer = server;
     createWindow();
     registerDevToolsShortcut();
@@ -145,20 +335,12 @@ app.whenReady().then(() => {
   });
 }).catch((err) => {
   console.error('Server start failed:', err);
-  localPort = 2928;
-  return serve(APP_PATH, localPort).then((server) => {
-    localServer = server;
-    createWindow();
-    registerDevToolsShortcut();
-    setOpenAtLogin();
-    setupAutoUpdater();
-  });
-}).catch((err) => {
-  console.error('Server retry failed:', err);
-  createWindow();
-  registerDevToolsShortcut();
-  setOpenAtLogin();
-  setupAutoUpdater();
+  dialog.showErrorBox('Başlatma hatası', 'Yerel sunucu başlatılamadı. Port meşgul olabilir. Uygulama kapatılıyor.');
+  app.quit();
+});
+
+app.on('before-quit', () => {
+  isQuitting = true;
 });
 
 app.on('will-quit', () => {

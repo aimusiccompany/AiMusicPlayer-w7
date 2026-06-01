@@ -37,7 +37,19 @@ function snapshotToPlayerState(system, playback, playlist, ad, specialAd, stockA
     // Hiçbir slotta değilsek (deviceTimeRecordIndex < 0) çalma; 24:00 placeholder tek kayıt olabilir
     if (deviceTimeRecordIndex < 0) rec = null
   }
-  const broadcastEnded = rec === null && upcomingSchedule && upcomingSchedule.length > 0
+  // Yayın bitmiş say: sadece gerçekten son kayıt bittiyse (24:00 placeholder hariç)
+  let broadcastEnded = false
+  if (rec === null && upcomingSchedule && upcomingSchedule.length > 0) {
+    const realRecords = upcomingSchedule.filter((r) => {
+      const end = r.endTime != null ? r.endTime : (r.startTime != null ? r.startTime + (r.audio && r.audio.duration ? r.audio.duration : 0) : 0)
+      return end < DAY
+    })
+    if (realRecords.length > 0) {
+      const lastEnd = realRecords[realRecords.length - 1]
+      const lastEndMs = lastEnd.endTime != null ? lastEnd.endTime : (lastEnd.startTime != null ? lastEnd.startTime + (lastEnd.audio && lastEnd.audio.duration ? lastEnd.audio.duration : 0) : 0)
+      broadcastEnded = devMs >= lastEndMs
+    }
+  }
   const songQueue = (playback || {}).songQueue || []
   const playlists = (playlist || {}).playlists || []
   const userPlaylists = (playlist || {}).userPlaylists || []
@@ -51,29 +63,39 @@ function snapshotToPlayerState(system, playback, playlist, ad, specialAd, stockA
 
   // Referans: ana liste VP'nin ürettiği upcomingSchedule (history) ile aynı; her kayıt gerçek startTime/endTime ve coverUrl taşır
   // Yayın bitmişse geçmiş listeyi gösterme; 24:00:00 placeholder kayıtlarını listeden çıkar
+  // Boş schedule (API hatası vb.) gelirse önceki listeyi koru – yanlışlıkla silinmesin
   let recordsToMap = broadcastEnded ? [] : ((upcomingSchedule || []).filter((r) => {
     const start = r.startTime != null ? r.startTime : 0
     return start < DAY
   }))
-  if (!broadcastEnded && typeof window !== 'undefined' && window.playerState && window.playerState.playlist && window.playerState.playlist.length > 0) {
-    const prev = window.playerState.playlist
-    const pastItems = prev.filter((item) => (item.endTimeMs != null ? item.endTimeMs : 0) < devMs)
-    const maxPastEnd = pastItems.length > 0 ? Math.max(...pastItems.map((i) => i.endTimeMs != null ? i.endTimeMs : 0)) : 0
-    const newHasFutureOnly = recordsToMap.length > 0 && (recordsToMap[0].startTime != null ? recordsToMap[0].startTime : 0) >= devMs
-    if (pastItems.length > 0 && newHasFutureOnly) {
-      const pastRaw = pastItems.map((item) => ({
-        startTime: item.startTimeMs,
-        endTime: item.endTimeMs,
-        name: item.title,
-        type: item.recordType === 'song' ? 'song' : (item.recordType === 'ad' ? 'ad' : (item.recordType === 'specialAd' ? 'specialAd' : 'stockAd')),
-        id: item.recordType === 'song' ? item.id : 'rec-' + item.recordType + '-' + (item.id || '') + '-' + (item.startTimeMs || 0),
-        album: item.artworkUrl ? { coverUrl: item.artworkUrl, name: item.artist } : null,
-        audio: item.audio || null,
-        coverUrl: item.artworkUrl || null
-      }))
-      recordsToMap = pastRaw.concat(recordsToMap.filter((r) => (r.startTime != null ? r.startTime : 0) >= maxPastEnd))
+  let fallbackFromPrevPlaylist = false
+  if (recordsToMap.length === 0 && !broadcastEnded && typeof window !== 'undefined' && window.playerState && window.playerState.playlist && window.playerState.playlist.length > 0) {
+    recordsToMap = window.playerState.playlist.map((item) => ({
+      startTime: item.startTimeMs,
+      endTime: item.endTimeMs,
+      name: item.title,
+      type: item.recordType === 'song' ? 'song' : (item.recordType === 'ad' ? 'ad' : (item.recordType === 'specialAd' ? 'specialAd' : 'stockAd')),
+      id: item.recordType === 'song' ? item.id : 'rec-' + item.recordType + '-' + (item.id || '') + '-' + (item.startTimeMs || 0),
+      album: item.artworkUrl ? { coverUrl: item.artworkUrl, name: item.artist } : null,
+      audio: item.audio || null,
+      coverUrl: item.artworkUrl || null
+    }))
+    fallbackFromPrevPlaylist = true
+  }
+  // upcomingSchedule boş gelip önceki playlist'ten liste doldurduysak, şu anki slotu da bu listeden bul (API hatası vb.)
+  if (fallbackFromPrevPlaylist && rec === null && recordsToMap.length > 0) {
+    for (let i = 0; i < recordsToMap.length; i++) {
+      const r = recordsToMap[i]
+      const startMs = r.startTime != null ? r.startTime : 0
+      const endMs = r.endTime != null ? r.endTime : (startMs + (r.audio && r.audio.duration ? r.audio.duration : 0))
+      if (devMs >= startMs && devMs < endMs) {
+        rec = r
+        deviceTimeRecordIndex = i
+        break
+      }
     }
   }
+  // VP o günün tüm akışını ve anlık parçayı veriyor; doğrudan recordsToMap kullanıyoruz, ek merge yok
   const mergedPlaylist = recordsToMap.map((record) => {
     const startMs = record.startTime != null ? record.startTime : 0
     const endMs = record.endTime != null ? record.endTime : (startMs + (record.audio && record.audio.duration ? record.audio.duration : 0))
@@ -206,13 +228,28 @@ function getUpcomingSchedule(player) {
 let _scheduleCacheKey = null
 let _scheduleCache = null
 let _scheduleCacheTime = 0
-const CACHE_TTL_MS = 3 * 60 * 1000 // 3 dk – yeni reklam/playlist için otomatik yenileme
+let _scheduleRefreshScheduled = false
+let _scheduleCachePrefetch = null // İlk açılışta çalma listesini hızlandırmak için erken doldurulur
+const CACHE_TTL_MS = 5 * 60 * 1000 // 5 dk – UI donmasını azaltmak için
+
+function _scheduleRecordEnd(r) {
+  if (r.endTime != null) return r.endTime
+  const start = r.startTime != null ? r.startTime : 0
+  const dur = r.audio && r.audio.duration ? r.audio.duration : 0
+  return start + dur
+}
+/** Yeni liste geç saatten başlıyorsa (örn. istek anından veya 13:00'dan) önceki cache'deki erken parçaları koru – çalma listesi hep gün başından itibaren görünsün */
+function _mergeEarlyFromCache(fresh) {
+  if (!Array.isArray(_scheduleCache) || _scheduleCache.length === 0 || !Array.isArray(fresh) || fresh.length === 0) return fresh
+  const firstNewStart = fresh[0].startTime != null ? fresh[0].startTime : 0
+  if (firstNewStart <= 0) return fresh
+  const early = _scheduleCache.filter((r) => _scheduleRecordEnd(r) <= firstNewStart)
+  if (early.length === 0) return fresh
+  return early.concat(fresh)
+}
+
 function getUpcomingScheduleCached(player) {
   const now = Date.now()
-  if (_scheduleCacheTime && now - _scheduleCacheTime > CACHE_TTL_MS) {
-    _scheduleCacheKey = null
-    _scheduleCache = null
-  }
   const sys = player.state.system.snapshot()
   const playlist = player.state.controllers.playlist?.state?.snapshot()
   const ad = player.state.controllers.ad?.state?.snapshot()
@@ -228,15 +265,46 @@ function getUpcomingScheduleCached(player) {
     (specialAd?.schedules || []).length,
     (stockAd?.schedules || []).length
   ].join('|')
-  if (key === _scheduleCacheKey && Array.isArray(_scheduleCache)) return _scheduleCache
+  const cacheValid = key === _scheduleCacheKey && Array.isArray(_scheduleCache)
+  const cacheExpired = _scheduleCacheTime && now - _scheduleCacheTime > CACHE_TTL_MS
+  if (cacheValid && !cacheExpired) return _scheduleCache
+  if (cacheExpired && cacheValid && !_scheduleRefreshScheduled) {
+    _scheduleRefreshScheduled = true
+    const doRefresh = () => {
+      try {
+        const fresh = getUpcomingSchedule(player)
+        if (fresh && fresh.length > 0) {
+          _scheduleCache = _mergeEarlyFromCache(fresh)
+          _scheduleCacheTime = Date.now()
+          if (typeof window !== 'undefined' && window.requestVPSync) window.requestVPSync()
+        }
+      } catch (_) { /* önbelleği koru */ }
+      _scheduleRefreshScheduled = false
+    }
+    if (typeof requestIdleCallback !== 'undefined') {
+      requestIdleCallback(doRefresh, { timeout: 3000 })
+    } else {
+      setTimeout(doRefresh, 50)
+    }
+    return _scheduleCache
+  }
   _scheduleCacheKey = key
-  _scheduleCache = getUpcomingSchedule(player)
-  _scheduleCacheTime = now
-  return _scheduleCache
+  if (Array.isArray(_scheduleCachePrefetch) && _scheduleCachePrefetch.length > 0) {
+    _scheduleCache = _mergeEarlyFromCache(_scheduleCachePrefetch)
+    _scheduleCachePrefetch = null
+    _scheduleCacheTime = now
+    return _scheduleCache
+  }
+  const fresh = getUpcomingSchedule(player)
+  if (fresh && fresh.length > 0) {
+    _scheduleCache = _mergeEarlyFromCache(fresh)
+    _scheduleCacheTime = now
+  }
+  return Array.isArray(_scheduleCache) ? _scheduleCache : []
 }
+// Yenileme sonrası VP boş dönerse önceki listeyi kaybetmemek için _scheduleCache silinmez; sadece key/süre sıfırlanır
 function invalidateScheduleCache() {
   _scheduleCacheKey = null
-  _scheduleCache = null
   _scheduleCacheTime = 0
 }
 
@@ -283,6 +351,19 @@ async function initVirtualPlayer(userId) {
   player.use(client, persistStorage)
   player.startRealtimeSimulation()
 
+  // Çalma listesini hızlandır: ilk syncState gelmeden schedule'ı arka planda hesapla
+  const doPrefetch = () => {
+    try {
+      const fresh = getUpcomingSchedule(player)
+      if (fresh && fresh.length > 0) _scheduleCachePrefetch = fresh
+    } catch (_) {}
+  }
+  if (typeof requestIdleCallback !== 'undefined') {
+    requestIdleCallback(doPrefetch, { timeout: 200 })
+  } else {
+    setTimeout(doPrefetch, 50)
+  }
+
   if (typeof window !== 'undefined') {
     window.virtualPlayer = player
     window.state = player.state
@@ -306,8 +387,21 @@ async function initVirtualPlayer(userId) {
     const upcomingSchedule = getUpcomingScheduleCached(player)
     const deviceTimeMs = getDeviceTimeMs()
 
-    const next = snapshotToPlayerState(sys, playback, playlist, ad, specialAd, stockAd, upcomingSchedule, deviceTimeMs)
+    let next = snapshotToPlayerState(sys, playback, playlist, ad, specialAd, stockAd, upcomingSchedule, deviceTimeMs)
+    // Yenileme sırasında yayın kesilmesin: yeni veri "yayın dışı" veya liste boş dönüyorsa, çalıyorsak önceki listeyi ve parçayı koru
     if (typeof window !== 'undefined' && window.playerState) {
+      const hadRecord = window.playerState.activeRecord && window.playerState.activeRecord.audio && window.playerState.activeRecord.audio.url
+      const hadList = window.playerState.playlist && window.playerState.playlist.length > 0
+      const newSaysOff = !next.activeRecord || !next.activeRecord.audio || !next.activeRecord.audio.url
+      const newListEmpty = !next.playlist || next.playlist.length === 0
+      if (hadRecord && hadList && (newSaysOff || newListEmpty)) {
+        next = Object.assign({}, next, {
+          activeRecord: window.playerState.activeRecord,
+          playlist: window.playerState.playlist,
+          currentTrackIndex: window.playerState.currentTrackIndex,
+          ads: window.playerState.ads != null ? window.playerState.ads : next.ads
+        })
+      }
       Object.assign(window.playerState, next)
     }
     if (typeof window !== 'undefined') {
@@ -331,7 +425,7 @@ async function initVirtualPlayer(userId) {
         window.dispatchEvent(new CustomEvent('virtualplayer-activerecord', {
           detail: {
             url: rec.audio.url,
-            startTime: rec.startTime / 1000,
+            startTime: startTimeMs / 1000,
             startTimeMs,
             durationMs,
             duration: rec.audio.duration / 1000,
@@ -373,9 +467,9 @@ async function initVirtualPlayer(userId) {
     setTimeout(syncState, 1500)
     setInterval(syncState, 1000)
     setInterval(function () {
-      invalidateScheduleCache()
+      _scheduleCacheTime = 0
       syncState()
-    }, 3 * 60 * 1000)
+    }, 5 * 60 * 1000)
     return player
   })
 }

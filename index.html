@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://api.aimusic.com.tr https://cdn.jsdelivr.net; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' https://cdn.aimusic.com.tr https:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.aimusic.com.tr; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' https://cdn.aimusic.com.tr https:;">
   <title>AI Music Player</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -144,6 +144,8 @@
 
   <audio id="app-audio" style="display:none" crossorigin="anonymous"></audio>
 
+  <div id="update-toast" class="update-toast" aria-live="polite" aria-hidden="true"></div>
+
   <!-- İletişim modal -->
   <div class="contact-overlay" id="contact-overlay" aria-hidden="true">
     <div class="contact-modal" role="dialog" aria-labelledby="contact-title">
@@ -192,7 +194,7 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="supabase-umd.js"></script>
   <script src="sw-register.js"></script>
   <script src="app.js"></script>
 </body>

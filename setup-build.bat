@@ -9,7 +9,16 @@ echo.
 
 cd /d "%~dp0"
 
-echo [1/2] Bagimliliklar yukleniyor...
+echo [0/3] Surum yukseltiliyor...
+node scripts/bump-version.js
+if errorlevel 1 (
+    echo HATA: Surum yukseltme basarisiz.
+    pause
+    exit /b 1
+)
+
+echo.
+echo [1/3] Bagimliliklar yukleniyor...
 call npm install
 if errorlevel 1 (
     echo.
@@ -19,7 +28,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/2] Windows kurulum paketi (32+64 bit) olusturuluyor...
+echo [2/3] Windows kurulum paketi (32+64 bit) olusturuluyor...
 call npm run dist
 if errorlevel 1 (
     echo.

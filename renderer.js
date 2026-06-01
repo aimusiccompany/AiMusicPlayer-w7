@@ -34,6 +34,8 @@
       }
     }
     if (!urls.length) return;
+    if (!window._prefetchSentUrls) window._prefetchSentUrls = new Set();
+    urls.forEach(function (u) { window._prefetchSentUrls.add(u); });
     var controller = navigator.serviceWorker && navigator.serviceWorker.controller;
     if (controller) {
       controller.postMessage({ type: 'PREFETCH_FILES', urls: urls });
@@ -99,6 +101,23 @@
     var theme = localStorage.getItem('aimusic-theme') || 'dark';
     document.body.setAttribute('data-theme', theme);
   })();
+
+  // Güncelleme bildirimi: paketlenmiş uygulamada yeni sürüm bulunduğunda ekranda toast gösterilir
+  if (window.electronAPI && typeof window.electronAPI.onUpdateAvailable === 'function') {
+    window.electronAPI.onUpdateAvailable(function (data) {
+      var v = (data && data.version) ? data.version : '';
+      var toast = document.getElementById('update-toast');
+      if (toast) {
+        toast.textContent = 'Yeni sürüm mevcut (v' + v + '). İndiriliyor… Uygulama kapatıldığında güncelleme kurulacak.';
+        toast.setAttribute('aria-hidden', 'false');
+        toast.classList.add('update-toast--visible');
+        setTimeout(function () {
+          toast.classList.remove('update-toast--visible');
+          toast.setAttribute('aria-hidden', 'true');
+        }, 8000);
+      }
+    });
+  }
 
   var SUPABASE_URL = 'https://api.aimusic.com.tr';
   var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp1aXN1aHVlcHZxc2Nzd2NvY3FpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTgwNDUzODUsImV4cCI6MjAzMzYyMTM4NX0.Lo0dFFPUNvsLIBxitmsi_mmTtDlVABsqgd74rGrvHq0';
@@ -212,7 +231,9 @@
   // UI güncelleme: state → DOM (doğrudan çağrılar için tek seferlik güncelleme)
   // Not: Saat, tarih ve selamlama sadece sidebar saat zamanlayıcısından güncellenir (ekstra yük yok).
   function updateUIFromStateImpl() {
-    const s = window.playerState;
+    try {
+      var s = window.playerState;
+      if (!s) return;
 
     // Sidebar: sadece state’e bağlı alanlar (saat/tarih/selamlama ayrı timer’da)
     const locMini = document.getElementById('sidebar-location-mini');
@@ -242,10 +263,16 @@
     if (loadingEl) loadingEl.setAttribute('aria-hidden', 'true');
     updateContentHeader(currentView, s);
     var center = getCenterList(s);
-    var playlistKey = currentView + '|' + (s.currentTrackIndex >= 0 ? s.currentTrackIndex : -1) + '|' + (s.playlist ? s.playlist.length : 0);
+    var playlistKey = currentView + '|' + (s.currentTrackIndex >= 0 ? s.currentTrackIndex : -1) + '|' + (s.playlist ? s.playlist.length : 0) + '|' + (s.playlist && s.playlist[0] ? s.playlist[0].id : '');
     if (playlistKey !== window._lastPlaylistKey) {
       window._lastPlaylistKey = playlistKey;
-      renderPlaylist(center.list, center.currentIndexInList);
+      var list = center.list;
+      var idx = center.currentIndexInList;
+      if (list && list.length > 80 && typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(function () { renderPlaylist(list, idx); }, { timeout: 200 });
+      } else {
+        renderPlaylist(list, idx);
+      }
     }
 
     // Yayın akışı bu saatte var mı? (activeRecord = şu anki slot; pause olsa bile yayın vardır)
@@ -362,6 +389,7 @@
       window._lastAdsKey = adsKey;
       renderAds(s.ads);
     }
+    } catch (e) { console.warn('[UI]', e); }
   }
 
   function formatTime(sec) {
@@ -404,7 +432,7 @@
       var artSrc = track.artworkUrl || null;
       if (!artSrc && track.recordType === 'ad') artSrc = AD_LOGO_URL;
       var art = artSrc
-        ? '<img src="' + escapeHtml(artSrc) + '" alt="" class="track-art-img' + (track.recordType === 'ad' ? ' track-art-img--ad-logo' : '') + '" style="display:block" data-fallback="next" onerror="this.style.display=\'none\'; this.nextElementSibling.style.display=\'flex\';"><div class="track-art-placeholder track-art-placeholder--anon" style="display:none">—</div>'
+        ? '<img src="' + escapeHtml(artSrc) + '" alt="" class="track-art-img' + (track.recordType === 'ad' ? ' track-art-img--ad-logo' : '') + '" style="display:block" data-fallback="next"><div class="track-art-placeholder track-art-placeholder--anon" style="display:none">—</div>'
         : '<div class="track-art-placeholder track-art-placeholder--anon">—</div>';
       var tagLabel = (track.tag && String(track.tag).trim()) ? escapeHtml(track.tag) : 'MÜZİK';
       var num = (track.fullIndex != null ? track.fullIndex + 1 : i + 1);
@@ -427,7 +455,7 @@
       li.addEventListener('click', function (e) {
         if (e.target.closest('.track-actions')) return;
         var idx = li.dataset.fullIndex != null ? parseInt(li.dataset.fullIndex, 10) : parseInt(li.dataset.index, 10);
-        if (!isNaN(idx) && window.onPlaylistTrackSelect) window.onPlaylistTrackSelect(idx);
+        if (!isNaN(idx) && idx >= 0 && window.onPlaylistTrackSelect) window.onPlaylistTrackSelect(idx);
       });
     });
     el.querySelectorAll('.btn-like').forEach(function (btn) {
@@ -462,6 +490,8 @@
     if (playingLi && typeof playingLi.scrollIntoView === 'function') {
       playingLi.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+    // CSP uyumu: dinamik eklenen img'lere fallback (inline onerror güvenlik nedeniyle çalışmayabilir)
+    setupImageFallbacks();
   }
 
   function renderAds(ads) {
@@ -687,6 +717,7 @@
     var next = s.playlist[idx + 1];
     var url = next && next.audio && next.audio.url ? next.audio.url : null;
     if (!url) return;
+    if (window._prefetchSentUrls && window._prefetchSentUrls.has(url)) return;
     if (!nextTrackPreloadAudio) nextTrackPreloadAudio = new Audio();
     if (nextTrackPreloadAudio.src !== url) {
       nextTrackPreloadAudio.src = url;
@@ -726,58 +757,90 @@
     return now.getHours() * 60 * 60 * 1000 + now.getMinutes() * 60 * 1000 + now.getSeconds() * 1000 + now.getMilliseconds();
   }
 
-  // Virtual Player: activeRecord → ses oynat. URL'ler Service Worker (file-cache-manager-sw) tarafından intercept edilir; önbellekte varsa ağa gitmeden locale'den döner.
+  // Virtual Player: activeRecord → ses oynat. Her parça (ilk dahil) cihaz saatine göre olması gereken saniyeden başlar; akış kayması olmaz.
   var appAudio = document.getElementById('app-audio');
-  var activeRecordLoadId = 0; // so we only play() after the current source is loaded, avoiding "play() interrupted by new load"
+  var activeRecordLoadId = 0;
+  window._pendingActiveRecord = null;
+  window._currentActiveRecordUrl = null;
+  function applyActiveRecord(d) {
+    if (!d || !d.url) {
+      window._trackDurationSec = null;
+      window._currentActiveRecordUrl = null;
+      activeRecordLoadId++;
+      appAudio.pause();
+      appAudio.removeAttribute('src');
+      if (window.playerState) window.playerState.isPlaying = false;
+      updateUIFromState();
+      return;
+    }
+    window._currentActiveRecordUrl = d.url;
+    var thisLoadId = ++activeRecordLoadId;
+    var startTimeMs = d.startTimeMs != null ? Number(d.startTimeMs) : null;
+    var durationMs = d.durationMs != null ? Number(d.durationMs) : 0;
+    var startOffset = 0;
+    if (startTimeMs != null && durationMs > 0) {
+      var nowMs = getCurrentTimeInMilliseconds();
+      var elapsedMs = nowMs - startTimeMs;
+      if (elapsedMs >= durationMs) {
+        activeRecordLoadId++;
+        appAudio.pause();
+        appAudio.removeAttribute('src');
+        if (window.playerState) window.playerState.isPlaying = false;
+        updateUIFromState();
+        return;
+      }
+      startOffset = elapsedMs > 0 ? Math.min(elapsedMs / 1000, durationMs / 1000) : 0;
+    } else if (d.currentOffset != null && !isNaN(d.currentOffset)) {
+      startOffset = Math.max(0, d.currentOffset);
+    }
+    window._trackDurationSec = d.duration != null && !isNaN(d.duration) ? Number(d.duration) : null;
+    appAudio.src = d.url;
+    var vol = (window.playerState && window.playerState.volume != null) ? window.playerState.volume / 100 : 1;
+    if (window.playerState && window.playerState.mutedByPause) vol = 0;
+    appAudio.volume = vol;
+    appAudio.currentTime = startOffset;
+    if (window.playerState) window.playerState.currentTime = startOffset;
+    appAudio.addEventListener('canplay', function onCanPlay() {
+      appAudio.removeEventListener('canplay', onCanPlay);
+      if (thisLoadId !== activeRecordLoadId) return;
+      appAudio.currentTime = startOffset;
+      appAudio.play().catch(function (err) { console.warn('Oynatma hatası:', err); });
+      if (window.playerState) window.playerState.isPlaying = true;
+      updateUIFromState();
+    }, { once: true });
+    if (window.playerState) window.playerState.isPlaying = true;
+    updateUIFromState();
+  }
   if (appAudio) {
     window.addEventListener('virtualplayer-activerecord', function (e) {
       try {
         var d = e.detail;
         if (!d || !d.url) {
-          window._trackDurationSec = null;
-          activeRecordLoadId++;
-          appAudio.pause();
-          appAudio.removeAttribute('src');
-          if (window.playerState) window.playerState.isPlaying = false;
-          updateUIFromState();
+          window._pendingActiveRecord = null;
+          applyActiveRecord(d);
           return;
         }
-        var thisLoadId = ++activeRecordLoadId;
-        var startTimeMs = d.startTimeMs != null ? Number(d.startTimeMs) : null;
-        var durationMs = d.durationMs != null ? Number(d.durationMs) : 0;
-        var startOffset = 0;
-        if (startTimeMs != null && durationMs > 0) {
-          var nowMs = getCurrentTimeInMilliseconds();
-          var elapsedMs = nowMs - startTimeMs;
-          if (elapsedMs >= durationMs) {
-            activeRecordLoadId++;
-            appAudio.pause();
-            appAudio.removeAttribute('src');
-            if (window.playerState) window.playerState.isPlaying = false;
-            updateUIFromState();
-            return;
-          }
-          startOffset = elapsedMs > 0 ? Math.min(elapsedMs / 1000, durationMs / 1000) : 0;
-        } else if (d.currentOffset != null && !isNaN(d.currentOffset)) {
-          startOffset = Math.max(0, d.currentOffset);
+        var isNewTrack = d.url !== window._currentActiveRecordUrl;
+        var dur = window._trackDurationSec != null ? window._trackDurationSec : (appAudio.duration && !isNaN(appAudio.duration) ? appAudio.duration : 0);
+        var cur = appAudio.currentTime;
+        // Parça bitmeden kesilmesin: mevcut parçada 3 sn'den fazla kaldıysa bitene kadar bekle
+        // Aynı dosyaya tekrar istek atmayalım: preloadNextTrack() zaten sıradaki parçayı yüklüyor, ekstra _preloadNextAudio kaldırıldı
+        if (isNewTrack && appAudio.src && dur > 0 && cur < dur - 3) {
+          window._pendingActiveRecord = d;
+          clearTimeout(window._pendingActiveRecordTimeout);
+          window._pendingActiveRecordTimeout = setTimeout(function () {
+            if (window._pendingActiveRecord) {
+              var pending = window._pendingActiveRecord;
+              window._pendingActiveRecord = null;
+              applyActiveRecord(pending);
+              updateUIFromState();
+            }
+          }, 5000);
+          return;
         }
-        window._trackDurationSec = d.duration != null && !isNaN(d.duration) ? Number(d.duration) : null;
-        appAudio.src = d.url;
-        var vol = (window.playerState && window.playerState.volume != null) ? window.playerState.volume / 100 : 1;
-        if (window.playerState && window.playerState.mutedByPause) vol = 0;
-        appAudio.volume = vol;
-        appAudio.currentTime = startOffset;
-        if (window.playerState) window.playerState.currentTime = startOffset;
-        appAudio.addEventListener('canplay', function onCanPlay() {
-          appAudio.removeEventListener('canplay', onCanPlay);
-          if (thisLoadId !== activeRecordLoadId) return;
-          appAudio.currentTime = startOffset;
-          appAudio.play().catch(function (err) { console.warn('Oynatma hatası:', err); });
-          if (window.playerState) window.playerState.isPlaying = true;
-          updateUIFromState();
-        }, { once: true });
-        if (window.playerState) window.playerState.isPlaying = true;
-        updateUIFromState(); // show loading/playing state immediately
+        clearTimeout(window._pendingActiveRecordTimeout);
+        window._pendingActiveRecord = null;
+        applyActiveRecord(d);
       } catch (err) {
         console.warn('virtualplayer-activerecord:', err);
       }
@@ -820,9 +883,33 @@
       if (totEl) totEl.textContent = formatTime(dur);
       if (fillEl) fillEl.style.width = (dur > 0 ? (appAudio.currentTime / dur) * 100 : 0) + '%';
     });
-    // Referans (audio.js): onend sadece playerState = 'idle'. Geçişi VP realtime simulation yapar; advance() → activeRecord değişir → abonelik syncState → activerecord dispatch.
     appAudio.addEventListener('ended', function () {
+      clearTimeout(window._pendingActiveRecordTimeout);
       if (window.playerState) window.playerState.isPlaying = false;
+      if (window._pendingActiveRecord) {
+        var pending = window._pendingActiveRecord;
+        window._pendingActiveRecord = null;
+        applyActiveRecord(pending);
+        var d2 = pending;
+        if (d2 && d2.url) {
+          var nowImg = document.getElementById('now-playing-art-img');
+          var nowPl = document.getElementById('now-playing-art-placeholder');
+          var plImg = document.getElementById('player-art-img');
+          var plPl = document.getElementById('player-art-placeholder');
+          var adUrl = (d2.type === 'ad' || d2.type === 'specialAd' || d2.type === 'stockAd') && !d2.artworkUrl ? AD_LOGO_URL : d2.artworkUrl;
+          if (adUrl) {
+            if (nowImg) { nowImg.src = adUrl; nowImg.style.display = 'block'; }
+            if (nowPl) nowPl.style.display = 'none';
+            if (plImg) { plImg.src = adUrl; plImg.style.display = 'block'; }
+            if (plPl) plPl.style.display = 'none';
+          } else {
+            if (nowPl) nowPl.style.display = 'flex';
+            if (nowImg) nowImg.style.display = 'none';
+            if (plPl) plPl.style.display = 'flex';
+            if (plImg) plImg.style.display = 'none';
+          }
+        }
+      }
       updateUIFromState();
     });
   }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://api.aimusic.com.tr https://cdn.jsdelivr.net; img-src 'self' data: https:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.aimusic.com.tr; img-src 'self' data: https:;">
   <title>Giriş - AI Music Player</title>
   <link rel="stylesheet" href="login.css">
 </head>
@@ -43,7 +43,7 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="supabase-umd.js"></script>
   <script src="login.js"></script>
 </body>
 </html>

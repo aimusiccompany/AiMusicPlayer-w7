@@ -8,18 +8,31 @@ const path = require('path');
 const root = __dirname;
 const outApp = path.join(root, 'app.js');
 
-esbuild.build({
-  entryPoints: [path.join(root, 'src', 'vp-init.js')],
-  bundle: true,
-  format: 'iife',
-  globalName: 'VPBundle',
-  outfile: path.join(root, '.tmp-vp.js'),
-  platform: 'browser',
-  target: ['chrome70'],
-  minify: true,
-  sourcemap: false,
-  logLevel: 'info'
-}).then(() => {
+Promise.all([
+  esbuild.build({
+    entryPoints: [path.join(root, 'src', 'vp-init.js')],
+    bundle: true,
+    format: 'iife',
+    globalName: 'VPBundle',
+    outfile: path.join(root, '.tmp-vp.js'),
+    platform: 'browser',
+    target: ['chrome70'],
+    minify: true,
+    sourcemap: false,
+    logLevel: 'info'
+  }),
+  esbuild.build({
+    entryPoints: [path.join(root, 'src', 'supabase-global.js')],
+    bundle: true,
+    format: 'iife',
+    outfile: path.join(root, 'supabase-umd.js'),
+    platform: 'browser',
+    target: ['chrome70'],
+    minify: true,
+    sourcemap: false,
+    logLevel: 'info'
+  })
+]).then(() => {
   const vpCode = fs.readFileSync(path.join(root, '.tmp-vp.js'), 'utf8');
   fs.unlinkSync(path.join(root, '.tmp-vp.js'));
   const rendererCode = fs.readFileSync(path.join(root, 'renderer.js'), 'utf8');
