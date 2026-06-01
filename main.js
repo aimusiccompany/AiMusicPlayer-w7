@@ -160,7 +160,7 @@ process.on('unhandledRejection', (reason) => handleFatalError(reason, 'unhandled
 
 appendLogLine('info', ['start', 'zone=' + zoneName, 'port=' + String(localPort), 'lowRamMode=' + String(lowRamMode)]);
 
-// Tek örnek: Uygulama zaten açıksa veya arka planda çalışıyorsa ikinci açılış iptal edilir, mevcut pencere öne getirilir (EADDRINUSE hatası önlenir).
+// Tek örnek kilidi
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
@@ -196,7 +196,6 @@ function createWindow() {
   });
 
   mainWindow.setMenu(null);
-
   mainWindow.loadURL(getAppUrl('login.html'));
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
@@ -240,7 +239,6 @@ function registerDevToolsShortcut() {
   });
 }
 
-// Bilgisayar açılışıyla birlikte uygulamanın otomatik başlaması (Windows oturum açıldığında).
 function setOpenAtLogin() {
   try {
     app.setLoginItemSettings({ openAtLogin: true });
@@ -249,7 +247,7 @@ function setOpenAtLogin() {
   }
 }
 
-// Otomatik güncelleme: sadece paketlenmiş (yayınlanmış) sürümde çalışır; güncelleme sunucusundan yeni sürüm varsa indirir ve kullanıcı onayıyla kurar.
+// --- GELİŞMİŞ OTOMATİK GÜNCELLEME SİSTEMİ ---
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
   let autoUpdater;
@@ -260,7 +258,10 @@ function setupAutoUpdater() {
     return;
   }
 
-  // Güncelleme kaynağının GitHub Releases olduğunu ve hedef repoyu doğrudan koda deklare ediyoruz
+  // app-update.yml ile senkronizasyon ve konfigürasyon ezme
+  autoUpdater.channel = 'latest';
+  autoUpdater.allowUpdatesInDevelopment = false;
+  
   autoUpdater.setFeedURL({
     provider: 'github',
     owner: 'aimusiccompany',
@@ -270,32 +271,81 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
-  autoUpdater.on('update-available', (info) => {
+  // Hem DevTools konsoluna zorla yazan hem de Arayüze (Renderer) güvenli veri fırlatan merkezi fonksiyon
+  const broadcastUpdaterStatus = (statusName, dataObj = {}, consoleMessage = '') => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('update-available', { version: info.version });
+      // 1. Sağdaki DevTools konsoluna basar
+      if (consoleMessage) {
+        const cleanMsg = consoleMessage.replace(/`/g, '\\`').replace(/\n/g, ' ');
+        mainWindow.webContents.executeJavaScript(`console.log("[AutoUpdater]: ${cleanMsg}");`).catch(() => {});
+      }
+      // 2. Arayüze (IPC Renderer) nesne halinde gönderir (Örn: yüzde barı basmak istersen)
+      mainWindow.webContents.send('auto-updater-channel', { status: statusName, ...dataObj });
     }
+  };
+
+  autoUpdater.on('checking-for-update', () => {
+    broadcastUpdaterStatus('checking', {}, 'GitHub üzerinden yeni sürüm kontrolleri başlatıldı...');
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    broadcastUpdaterStatus('up-to-date', { version: info.version }, `Uygulama güncel. Sunucudaki en son sürüm: v${info.version}`);
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    broadcastUpdaterStatus('update-available', { version: info.version }, `YENİ SÜRÜM YAYINDA: v${info.version}! Kurulum dosyası arka planda indirilmeye başlanıyor...`);
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    const percentRounded = Math.round(progressObj.percent);
+    const speedKb = Math.round(progressObj.bytesPerSecond / 1024);
+    
+    broadcastUpdaterStatus(
+      'downloading', 
+      { percent: percentRounded, speed: speedKb }, 
+      `Yeni paket indiriliyor: %${percentRounded} | Hız: ${speedKb} KB/s`
+    );
   });
 
   autoUpdater.on('update-downloaded', (info) => {
-    const opts = {
-      type: 'info',
-      title: 'Guncelleme hazir',
-      message: 'Yeni surum indirildi (v' + (info && info.version ? info.version : '') + '). Uygulamayi simdi yeniden baslatarak guncellemeyi uygulayabilirsiniz.',
-      buttons: ['Yeniden başlat', 'Daha sonra'],
+    broadcastUpdaterStatus('downloaded', { version: info.version }, `v${info.version} kurulum paketi başarıyla yerel diske indirildi. Kullanıcı seçimi bekleniyor.`);
+
+    // İstediğin özelleştirilmiş modal ekran (Dialog) yapısı
+    const dialogOptions = {
+      type: 'question',
+      title: 'Güncelleme Hazır',
+      message: `Yeni bir sürüm indirildi (v${info.version}).`,
+      detail: 'Uygulamayı şimdi otomatik yeniden başlatarak güncellemeyi yüklemek ister misiniz, yoksa daha sonra mı hatırlatılsın?',
+      buttons: ['Hemen Yükle', 'Daha Sonra Hatırlat'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
     };
-    dialog.showMessageBox(mainWindow || null, opts).then((res) => {
-      if (res.response === 0) autoUpdater.quitAndInstall(false, true);
+
+    dialog.showMessageBox(mainWindow || null, dialogOptions).then((res) => {
+      if (res.response === 0) {
+        // "Hemen Yükle" seçilirse uygulamayı kapatır ve yeni sürümü kurarak tetikler
+        autoUpdater.quitAndInstall(false, true);
+      } else {
+        // "Daha Sonra Hatırlat" seçilirse log düşer ve pencere kapanır, kullanıcı kesintiye uğramaz
+        broadcastUpdaterStatus('postponed', { version: info.version }, 'Kullanıcı güncellemeyi erteledi. Bir sonraki açılışta veya çıkışta otomatik kurulacak.');
+      }
+    }).catch((err) => {
+      console.error('Modal dialog hatası:', err);
     });
   });
 
   autoUpdater.on('error', (err) => {
-    console.warn('Guncelleme hatasi:', err.message || err);
+    const errorMsg = err.message || String(err);
+    broadcastUpdaterStatus('error', { error: errorMsg }, `Güncelleme döngüsünde hata: ${errorMsg}`);
   });
 
-  // Uygulama açıldıktan 3 saniye sonra sessizce güncelleme kontrolünü başlatır.
+  // Sistem ve alt port sunucularının tam oturması için uygulama açılışından 5 saniye sonra kontrolü ateşler
   setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(() => {});
-  }, 3000);
+    autoUpdater.checkForUpdates().catch((err) => {
+      broadcastUpdaterStatus('error', { error: err.message }, `checkForUpdates tetiklenirken kilitlenme: ${err.message}`);
+    });
+  }, 5000);
 }
 
 ipcMain.handle('get-app-version', () => {
@@ -338,7 +388,7 @@ app.whenReady().then(() => {
     createWindow();
     registerDevToolsShortcut();
     setOpenAtLogin();
-    setupAutoUpdater();
+    setupAutoUpdater(); // Güncelleme motorunu başlatır
   });
 }).catch((err) => {
   console.error('Server start failed:', err);
