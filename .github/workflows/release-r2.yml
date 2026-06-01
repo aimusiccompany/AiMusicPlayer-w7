@@ -12,7 +12,7 @@ jobs:
   build-and-upload:
     runs-on: windows-latest
     permissions:
-      contents: read
+      contents: write  # 🌟 electron-builder'ın release sayfasına dosya yükleyebilmesi için 'write' olmalı
       packages: read
     steps:
       - name: Checkout
@@ -45,12 +45,14 @@ jobs:
       - name: Build app bundle
         run: npm run build
 
-      - name: Build Electron (dist)
+      # 🌟 electron-builder hem derleme yapacak hem de GITHUB_TOKEN yardımıyla çıktıları doğrudan GitHub Release'e yükleyecek
+      - name: Run npm run dist and Publish
         run: npm run dist
         env:
-          # electron-builder için gerekirse
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Derlenen tüm çıktılar (updates klasörü altına) Cloudflare R2'ye gönderilir
       - name: Upload to Cloudflare R2
         uses: ryand56/r2-upload-action@v1.4
         with:
@@ -61,23 +63,3 @@ jobs:
           source-dir: dist
           destination-dir: updates
           output-file-url: true
-
-      # EXE ve latest.yml dosyalarını GitHub Release sayfasına ekle (indirilebilir asset)
-      - name: Upload assets to GitHub Release
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          UPLOAD_URL="${{ github.event.release.upload_url }}"
-          # {?name,label} kısmını kaldır
-          UPLOAD_URL="${UPLOAD_URL%\{*}"
-          for f in dist/*.exe dist/*.yml; do
-            [ -f "$f" ] || continue
-            name=$(basename "$f")
-            echo "Uploading $name..."
-            curl -sS -X POST \
-              -H "Authorization: token $GITHUB_TOKEN" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary "@$f" \
-              "${UPLOAD_URL}?name=$name"
-          done

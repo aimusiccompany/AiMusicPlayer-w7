@@ -239,7 +239,7 @@ if errorlevel 1 (
   goto :fail
 )
 
-set ASSETS=
+set "ASSETS="
 for %%f in ("%UPLOAD_DIR%\*.exe") do set ASSETS=!ASSETS! "%%~ff"
 for %%f in ("%UPLOAD_DIR%\*.yml") do set ASSETS=!ASSETS! "%%~ff"
 for %%f in ("%UPLOAD_DIR%\*.blockmap") do set ASSETS=!ASSETS! "%%~ff"
