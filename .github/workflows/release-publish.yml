@@ -19,6 +19,7 @@ jobs:
         shell: bash
     permissions:
       contents: write
+      packages: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,11 +35,15 @@ jobs:
       - name: Configure npm for GitHub Packages
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -n "$NPM_TOKEN" ]; then
-            echo "@ai-music-corp:registry=https://npm.pkg.github.com/" >> .npmrc
-            echo "//npm.pkg.github.com/:_authToken=$NPM_TOKEN" >> .npmrc
+          TOKEN="${NPM_TOKEN:-$GITHUB_TOKEN}"
+          if [ -z "$TOKEN" ]; then
+            echo "Missing token for GitHub Packages (NPM_TOKEN or GITHUB_TOKEN)."
+            exit 1
           fi
+          echo "@ai-music-corp:registry=https://npm.pkg.github.com/" >> .npmrc
+          echo "//npm.pkg.github.com/:_authToken=$TOKEN" >> .npmrc
 
       - name: Set version in package.json
         env:
