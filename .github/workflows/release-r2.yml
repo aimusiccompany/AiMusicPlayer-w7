@@ -64,7 +64,7 @@ jobs:
 
       # EXE ve latest.yml dosyalarını GitHub Release sayfasına ekle (indirilebilir asset)
       - name: Upload assets to GitHub Release
-	shell: bash
+	      shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
