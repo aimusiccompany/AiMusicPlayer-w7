@@ -41,8 +41,9 @@
     ],
     "publish": [
       {
-        "provider": "generic",
-        "url": "https://api.aimusic.com.tr/updates"
+        "provider": "github",
+        "owner": "aimusiccompany",
+        "repo": "AiMusicPlayer-w7"
       }
     ],
     "directories": {
