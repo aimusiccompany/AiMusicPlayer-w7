@@ -26,6 +26,7 @@ jobs:
 
       # GitHub Packages (@ai-music-corp) için .npmrc — NPM_TOKEN secret'ı tanımlıysa yazılır (if'te secrets kullanılamaz)
       - name: Configure npm for GitHub Packages
+        shell: bash
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
