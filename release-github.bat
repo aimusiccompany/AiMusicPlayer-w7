@@ -125,22 +125,68 @@ if errorlevel 1 (
   goto :fail
 )
 
-echo Dist aliniyor...
-call npm run dist
-if errorlevel 1 (
-  echo HATA: npm run dist basarisiz.
-  set "FAILED_STEP=npm-dist"
-  goto :fail
-)
-
 set "UPLOAD_DIR=%cd%\dist\release-upload"
 if exist "%UPLOAD_DIR%" rmdir /s /q "%UPLOAD_DIR%"
 mkdir "%UPLOAD_DIR%" >nul 2>&1
 
-copy /y "dist\*Setup*.exe" "%UPLOAD_DIR%\" >nul 2>&1
-copy /y "dist\latest.yml" "%UPLOAD_DIR%\" >nul 2>&1
+echo Dist aliniyor (x64)...
+call npm run dist:64
+if errorlevel 1 (
+  echo HATA: npm run dist:64 basarisiz.
+  set "FAILED_STEP=npm-dist-x64"
+  goto :fail
+)
 
-dir /b "%UPLOAD_DIR%\*Setup*.exe" >nul 2>&1
+set "SRC_X64_EXE="
+for %%f in ("dist\*Setup*.exe") do set "SRC_X64_EXE=%%~ff"
+if not defined SRC_X64_EXE (
+  echo HATA: x64 Setup exe bulunamadi.
+  set "FAILED_STEP=missing-setup-exe-x64"
+  goto :fail
+)
+
+set "X64_EXE_NAME=AI.Music.Player.Setup.%VERSION%.x64.exe"
+copy /y "%SRC_X64_EXE%" "%UPLOAD_DIR%\%X64_EXE_NAME%" >nul 2>&1
+if exist "%SRC_X64_EXE%.blockmap" copy /y "%SRC_X64_EXE%.blockmap" "%UPLOAD_DIR%\%X64_EXE_NAME%.blockmap" >nul 2>&1
+copy /y "dist\latest.yml" "%UPLOAD_DIR%\latest-x64.yml" >nul 2>&1
+
+del /q "dist\*Setup*.exe" >nul 2>&1
+del /q "dist\*Setup*.exe.blockmap" >nul 2>&1
+del /q "dist\latest.yml" >nul 2>&1
+
+echo Dist aliniyor (ia32)...
+call npm run dist:32
+if errorlevel 1 (
+  echo HATA: npm run dist:32 basarisiz.
+  set "FAILED_STEP=npm-dist-ia32"
+  goto :fail
+)
+
+set "SRC_IA32_EXE="
+for %%f in ("dist\*Setup*.exe") do set "SRC_IA32_EXE=%%~ff"
+if not defined SRC_IA32_EXE (
+  echo HATA: ia32 Setup exe bulunamadi.
+  set "FAILED_STEP=missing-setup-exe-ia32"
+  goto :fail
+)
+
+set "IA32_EXE_NAME=AI.Music.Player.Setup.%VERSION%.ia32.exe"
+copy /y "%SRC_IA32_EXE%" "%UPLOAD_DIR%\%IA32_EXE_NAME%" >nul 2>&1
+if exist "%SRC_IA32_EXE%.blockmap" copy /y "%SRC_IA32_EXE%.blockmap" "%UPLOAD_DIR%\%IA32_EXE_NAME%.blockmap" >nul 2>&1
+copy /y "dist\latest.yml" "%UPLOAD_DIR%\latest-ia32.yml" >nul 2>&1
+
+echo Combined latest.yml olusturuluyor...
+node "scripts/make-combined-latest-yml.js" "%UPLOAD_DIR%\latest-x64.yml" "%UPLOAD_DIR%\%X64_EXE_NAME%" "%UPLOAD_DIR%\latest-ia32.yml" "%UPLOAD_DIR%\%IA32_EXE_NAME%" "%UPLOAD_DIR%\latest.yml"
+if errorlevel 1 (
+  echo HATA: combined latest.yml olusturma basarisiz.
+  set "FAILED_STEP=latest-combine"
+  goto :fail
+)
+
+del /q "%UPLOAD_DIR%\latest-x64.yml" >nul 2>&1
+del /q "%UPLOAD_DIR%\latest-ia32.yml" >nul 2>&1
+
+dir /b "%UPLOAD_DIR%\*.exe" >nul 2>&1
 if errorlevel 1 (
   echo HATA: dist klasorunde Setup exe bulunamadi.
   set "FAILED_STEP=missing-setup-exe"
@@ -194,8 +240,9 @@ if errorlevel 1 (
 )
 
 set ASSETS=
-for %%f in ("%UPLOAD_DIR%\*Setup*.exe") do set ASSETS=!ASSETS! "%%~ff"
-set ASSETS=!ASSETS! "%UPLOAD_DIR%\latest.yml"
+for %%f in ("%UPLOAD_DIR%\*.exe") do set ASSETS=!ASSETS! "%%~ff"
+for %%f in ("%UPLOAD_DIR%\*.yml") do set ASSETS=!ASSETS! "%%~ff"
+for %%f in ("%UPLOAD_DIR%\*.blockmap") do set ASSETS=!ASSETS! "%%~ff"
 
 echo GitHub Release olusturuluyor...
 "%GH%" release create "%TAG%" !ASSETS! --title "%TAG%" --notes "Release %TAG% - AI Music Player"
