@@ -1,6 +1,6 @@
 {
   "name": "ai-music-player",
-  "version":"1.1.28",
+  "version":"1.1.32",
   "description": "AI Music Player - Electron uygulaması",
   "main": "main.js",
   "author": "AI Music",

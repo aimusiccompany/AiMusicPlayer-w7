@@ -9,7 +9,6 @@
 </head>
 <body data-theme="dark">
   <div class="app">
-    <!-- Sol sidebar - Navigasyon -->
     <aside class="sidebar">
       <div class="sidebar-header">
         <div class="logo logo-sidebar">
@@ -52,7 +51,6 @@
       </nav>
     </aside>
 
-    <!-- Ana içerik -->
     <main class="main-content">
       <section class="now-playing-card" id="now-playing-card">
         <div class="now-playing-art">
@@ -99,7 +97,6 @@
       </section>
     </main>
 
-    <!-- Sağ panel - Reklamlar -->
     <aside class="ads-panel">
       <div class="ads-header">
         <div class="ads-header-top">
@@ -111,7 +108,6 @@
       <ul class="ads-list" id="ads-list"></ul>
     </aside>
 
-    <!-- Alt oynatıcı çubuğu -->
     <footer class="player-bar">
       <div class="player-left">
         <div class="player-art">
@@ -144,19 +140,16 @@
 
   <audio id="app-audio" style="display:none" crossorigin="anonymous"></audio>
 
-  <div id="update-toast" class="update-toast" aria-live="polite" aria-hidden="true"></div>
-
-  <!-- İletişim modal -->
   <div class="contact-overlay" id="contact-overlay" aria-hidden="true">
     <div class="contact-modal" role="dialog" aria-labelledby="contact-title">
       <h2 class="contact-title" id="contact-title">İletişim</h2>
-      <p class="contact-intro">Uygulamamız, yayınlarımız veya hizmetlerimizle ilgili her türlü soru, görüş ve talebiniz için yanınızdayız. Deneyiminizi geliştirmek ve sorularınıza hızlı çözümler sunmak adına aşağıdaki kanallar üzerinden bizimle doğrudan iletişime geçebilirsiniz.</p>
+      <p class="contact-intro">Uygulamamız, yayınlarımız veya hizmetlerimizle ilgili her türlü soru, görüş ve talebiniz için yanınızdayız.</p>
       <div class="contact-actions">
-        <button type="button" class="contact-btn contact-btn-whatsapp" id="contact-whatsapp" title="WhatsApp ile yaz">
+        <button type="button" class="contact-btn contact-btn-whatsapp" id="contact-whatsapp">
           <span class="contact-btn-icon">WhatsApp</span>
           <span class="contact-btn-label">+90 546 263 09 02</span>
         </button>
-        <button type="button" class="contact-btn contact-btn-mail" id="contact-mail" title="E-posta gönder">
+        <button type="button" class="contact-btn contact-btn-mail" id="contact-mail">
           <span class="contact-btn-icon">E-posta</span>
           <span class="contact-btn-label">teknik@aimusic.com.tr</span>
         </button>
@@ -165,7 +158,6 @@
     </div>
   </div>
 
-  <!-- Ayarlar modal -->
   <div class="settings-overlay" id="settings-overlay" aria-hidden="true">
     <div class="settings-modal" role="dialog" aria-labelledby="settings-title">
       <h2 class="settings-title" id="settings-title">Ayarlar</h2>
@@ -194,8 +186,33 @@
     </div>
   </div>
 
+  <div id="updateModal" class="settings-overlay" aria-hidden="true" style="display:none; justify-content:center; align-items:center;">
+    <div class="settings-modal" role="dialog" style="max-width: 400px; text-align: center;">
+      <h2 class="settings-title">🚀 Güncelleme Hazır!</h2>
+      <p style="margin: 20px 0; color: #b3b3b3;">
+        Uygulamanın yeni sürümü (v<span id="updateVersionText"></span>) indirildi. <br>
+        Değişikliklerin aktif olması için uygulamayı yeniden başlatmalısın.
+      </p>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+	<button type="button" 
+          class="settings-refresh-btn" 
+          id="btn-install-now" 
+          style="background: #1db954 !important; color: #000 !important; font-weight: 900 !important; cursor: pointer !important; border: none !important; width: 100%; 	  padding: 20px; border-radius: 8px; font-size: 20px; margin-bottom: 10px;">
+  	  Hemen Yükle 🚀
+	</button>
+	<button type="button" 
+          class="settings-close" 
+          id="btn-close-modal"
+          style="background: #333 !important; color: #fff !important; cursor: pointer !important; border: none !important; width: 100%; padding: 15px; border-radius: 8px; 	  font-size: 16px; margin-top: 10px;">
+  	  Daha Sonra Hatırlat ⏳
+	</button>
+      </div>
+    </div>
+  </div>
+
   <script src="supabase-umd.js"></script>
   <script src="sw-register.js"></script>
   <script src="app.js"></script>
+  <script src="updater.js"></script>
 </body>
 </html>

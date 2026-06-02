@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   navigateToApp: () => ipcRenderer.invoke('navigate-to-app'),
   navigateToLogin: (fromLogout) => ipcRenderer.invoke('navigate-to-login', fromLogout),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  // Güncelleme indirilince modal tetiklemek için
+    onUpdateReady: (callback) => ipcRenderer.on('show-update-modal', (event, data) => callback(data)),
+    
+    // "Hemen Yükle" butonuna basıldığında main'e sinyal göndermek için
+    installUpdateNow: () => ipcRenderer.send('install-update-now'),
   
   // Eski tekil event dinleyicin (geriye dönük uyumluluk için aynen koruduk)
   onUpdateAvailable: (callback) => {
