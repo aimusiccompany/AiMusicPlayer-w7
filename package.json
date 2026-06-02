@@ -1,6 +1,6 @@
 {
   "name": "ai-music-player",
-  "version":"1.1.32",
+  "version":"1.1.33",
   "description": "AI Music Player - Electron uygulaması",
   "main": "main.js",
   "author": "AI Music",
@@ -36,6 +36,7 @@
   "build": {
     "appId": "com.aimusic.player",
     "productName": "AI Music Player",
+    "artifactName": "AI.Music.Player.Setup.${version}.${ext}",
     "asarUnpack": [
       "**/node_modules/electron-updater/**"
     ],
