@@ -81,6 +81,20 @@ ipcMain.handle('navigate-to-app', () => {
     }
 });
 
+ipcMain.handle('navigate-to-login', (_, fromLogout) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    var url = 'http://127.0.0.1:' + localPort + '/login.html';
+    if (fromLogout) url += '?logout=1';
+    mainWindow.loadURL(url);
+  }
+});
+
+ipcMain.handle('open-external', (_, url) => {
+  if (url && typeof url === 'string') {
+    shell.openExternal(url).catch(function () {});
+  }
+});
+
 ipcMain.on('install-update-now', () => {
   const { autoUpdater } = require('electron-updater');
   autoUpdater.quitAndInstall(false, true);
