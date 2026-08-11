@@ -1,6 +1,6 @@
 {
   "name": "ai-music-player",
-  "version":"1.1.35",
+  "version":"1.1.36",
   "description": "AI Music Player - Electron uygulaması",
   "main": "main.js",
   "author": "AI Music",
@@ -67,7 +67,7 @@
       "login.css",
       "assets/**",
       "file-cache-manager-sw.js",
-      "!**/node_modules/**",
+      "node_modules/**",
       "!dist",
       "!.git*",
       "!*.md",
