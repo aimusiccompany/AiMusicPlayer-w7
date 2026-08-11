@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.aimusic.com.tr; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' https://cdn.aimusic.com.tr https:;">
+  <!-- connect-src: Supabase Realtime wss:// üzerinden bağlanır (https:// şeması eşleşmez, ayrıca yazılmalı).
+       https: → medya ön yükleme fetch()'leri CDN'e gider; media-src ile aynı güven seviyesi. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https: wss://api.aimusic.com.tr; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' https://cdn.aimusic.com.tr https:; worker-src 'self';">
   <title>AI Music Player</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -31,22 +33,28 @@
       <nav class="nav">
         <p class="nav-heading">KÜTÜPHANEM</p>
         <a href="#" class="nav-link" data-view="favorites">
-          <span class="nav-icon heart">♥</span> Beğenilen Şarkılar
+          <span class="nav-icon heart" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 5.6a5.4 5.4 0 0 0-7.7 0L12 6.7l-1.1-1.1a5.4 5.4 0 0 0-7.7 7.7l8.8 8.8 8.8-8.8a5.4 5.4 0 0 0 0-7.7z"/></svg></span>
+          <span class="nav-label">Beğenilen Şarkılar</span>
         </a>
         <a href="#" class="nav-link active" data-view="playlist">
-          <span class="nav-icon note">♪</span> Çalma Listesi
+          <span class="nav-icon note" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+          <span class="nav-label">Çalma Listesi</span>
         </a>
         <a href="#" class="nav-link" data-view="ads">
-          <span class="nav-icon play">▶</span> Reklamlarım
+          <span class="nav-icon play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg></span>
+          <span class="nav-label">Reklamlarım</span>
         </a>
         <a href="#" class="nav-link" data-view="contact">
-          <span class="nav-icon contact">✉</span> İletişim
+          <span class="nav-icon contact" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg></span>
+          <span class="nav-label">İletişim</span>
         </a>
         <a href="#" class="nav-link" data-view="settings">
-          <span class="nav-icon gear">⚙</span> Ayarlar
+          <span class="nav-icon gear" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></span>
+          <span class="nav-label">Ayarlar</span>
         </a>
         <a href="#" class="nav-link" data-view="logout">
-          <span class="nav-icon exit">→</span> Çıkış Yap
+          <span class="nav-icon exit" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg></span>
+          <span class="nav-label">Çıkış Yap</span>
         </a>
       </nav>
     </aside>
@@ -58,15 +66,27 @@
           <div class="album-art-placeholder" id="now-playing-art-placeholder">—</div>
         </div>
         <div class="now-playing-info">
-          <span class="now-playing-greeting" id="now-playing-greeting">İyi Günler</span>
-          <span class="now-playing-badge" id="content-badge">Şu an çalınıyor</span>
+          <div class="np-meta-row">
+            <span class="now-playing-badge" id="content-badge">Şu an çalınıyor</span>
+            <span class="now-playing-greeting" id="now-playing-greeting">İyi Günler</span>
+          </div>
           <h3 class="now-playing-title" id="now-playing-title">—</h3>
           <p class="now-playing-genre" id="now-playing-genre">—</p>
         </div>
-        <button type="button" class="btn-playing" id="btn-now-playing-state">
-          <span class="btn-playing-dot" id="btn-playing-dot"></span>
-          <span class="btn-playing-text" id="btn-playing-text">Çalınıyor</span>
-        </button>
+        <div class="np-side">
+          <button type="button" class="btn-playing" id="btn-now-playing-state">
+            <span class="btn-playing-dot" id="btn-playing-dot"></span>
+            <span class="btn-playing-eq" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="btn-playing-text" id="btn-playing-text">Çalınıyor</span>
+          </button>
+          <div class="np-next" id="np-next" aria-hidden="true">
+            <span class="np-next-label">SIRADAKİ</span>
+            <span class="np-next-time" id="np-next-time"></span>
+            <span class="np-next-title" id="np-next-title">—</span>
+          </div>
+          <span class="np-remaining" id="np-remaining"></span>
+        </div>
+        <div class="np-progress" aria-hidden="true"><span class="np-progress-fill" id="np-progress-fill"></span></div>
       </section>
 
       <section class="playlist-section">
@@ -76,6 +96,11 @@
           <div class="playlist-update-indicator" id="playlist-update-indicator" aria-hidden="true">
             <span class="playlist-update-spinner" aria-label="Güncelleniyor"></span>
             <span class="playlist-update-text">Yayın Akışınız Güncellenmektedir!</span>
+          </div>
+          <div class="playlist-search">
+            <span class="playlist-search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+            <input type="text" class="playlist-search-input" id="playlist-search" placeholder="Listede ara…" autocomplete="off" spellcheck="false" aria-label="Listede ara">
+            <button type="button" class="playlist-search-clear" id="playlist-search-clear" aria-hidden="true" aria-label="Aramayı temizle">×</button>
           </div>
         </div>
         <div class="playlist-list-wrap">
@@ -89,6 +114,10 @@
             <span class="col-actions">Beğen</span>
           </div>
           <ul class="playlist" id="playlist"></ul>
+          <div class="playlist-empty" id="playlist-empty" aria-hidden="true">
+            <span class="playlist-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+            <p class="playlist-empty-text" id="playlist-empty-text">Sonuç bulunamadı</p>
+          </div>
           <div class="playlist-loading" id="playlist-loading" aria-hidden="false">
             <div class="playlist-loading-spinner" aria-label="Çalma listesi yükleniyor"></div>
             <p class="playlist-loading-text">Çalma listesi yükleniyor…</p>
@@ -103,7 +132,11 @@
           <h3 class="ads-title">Reklamlarım</h3>
           <span class="ads-count-pill" id="ads-count">0 Anons</span>
         </div>
-        <p class="ads-subtitle">Zamanlanmış anonslar</p>
+        <p class="ads-subtitle">Bugünün anons zaman çizelgesi</p>
+        <div class="ads-progress" aria-hidden="true">
+          <div class="ads-progress-track"><span class="ads-progress-fill" id="ads-progress-fill"></span></div>
+          <span class="ads-progress-text" id="ads-progress-text">0 / 0 yayınlandı</span>
+        </div>
       </div>
       <ul class="ads-list" id="ads-list"></ul>
     </aside>
@@ -132,6 +165,7 @@
         </div>
       </div>
       <div class="player-right">
+        <span class="volume-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg></span>
         <input type="range" class="volume-slider" id="volume" min="0" max="100" value="70" title="Ses">
         <span class="volume-percent" id="volume-percent">70%</span>
       </div>
@@ -186,33 +220,26 @@
     </div>
   </div>
 
-  <div id="updateModal" class="settings-overlay" aria-hidden="true" style="display:none; justify-content:center; align-items:center;">
-    <div class="settings-modal" role="dialog" style="max-width: 400px; text-align: center;">
-      <h2 class="settings-title">🚀 Güncelleme Hazır!</h2>
-      <p style="margin: 20px 0; color: #b3b3b3;">
-        Uygulamanın yeni sürümü (v<span id="updateVersionText"></span>) indirildi. <br>
-        Değişikliklerin aktif olması için uygulamayı yeniden başlatmalısın.
+  <div id="updateModal" aria-hidden="true">
+    <div class="settings-modal" role="dialog" aria-labelledby="update-modal-title">
+      <h2 class="settings-title" id="update-modal-title">🚀 Güncelleme Hazır!</h2>
+      <p class="update-modal-text">
+        Uygulamanın yeni sürümü (v<span id="updateVersionText"></span>) indirildi.<br>
+        Değişikliklerin aktif olması için uygulamayı yeniden başlatmalısınız.
       </p>
-      <div style="display: flex; flex-direction: column; gap: 10px;">
-	<button type="button" 
-          class="settings-refresh-btn" 
-          id="btn-install-now" 
-          style="background: #1db954 !important; color: #000 !important; font-weight: 900 !important; cursor: pointer !important; border: none !important; width: 100%; 	  padding: 20px; border-radius: 8px; font-size: 20px; margin-bottom: 10px;">
-  	  Hemen Yükle 🚀
-	</button>
-	<button type="button" 
-          class="settings-close" 
-          id="btn-close-modal"
-          style="background: #333 !important; color: #fff !important; cursor: pointer !important; border: none !important; width: 100%; padding: 15px; border-radius: 8px; 	  font-size: 16px; margin-top: 10px;">
-  	  Daha Sonra Hatırlat ⏳
-	</button>
+      <div class="update-modal-actions">
+        <button type="button" class="btn-update-install" id="btn-install-now">Hemen Yükle 🚀</button>
+        <button type="button" class="btn-update-later" id="btn-close-modal">Daha Sonra Hatırlat ⏳</button>
       </div>
     </div>
   </div>
 
+  <div class="update-toast" id="update-toast" role="status" aria-hidden="true"></div>
+
   <script src="supabase-umd.js"></script>
   <script src="sw-register.js"></script>
   <script src="app.js"></script>
+  <script src="ui.js"></script>
   <script src="updater.js"></script>
 </body>
 </html>

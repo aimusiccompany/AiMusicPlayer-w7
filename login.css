@@ -1,17 +1,24 @@
-/* Login ekranı - koyu tema, şık cam kart */
+/* ==========================================================================
+   AI Music Player — Giriş ekranı
+   Not: backdrop-filter (cam efekti) kaldırıldı. Windows 7 / GPU hızlandırması
+   kapalı makinelerde her karede tüm kart alanının yeniden bulanıklaştırılması
+   gerekiyordu; yerine aynı görünümü veren opak katman + ince kenar kullanıldı.
+   ========================================================================== */
 :root {
-  --bg-main: #121212;
-  --bg-card: rgba(28, 32, 48, 0.55);
-  --bg-card-border: rgba(255, 255, 255, 0.08);
-  --border: rgba(255, 255, 255, 0.1);
-  --text-primary: #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.75);
-  --text-muted: rgba(255, 255, 255, 0.45);
-  --accent-blue: #3b82f6;
-  --input-bg: rgba(255, 255, 255, 0.06);
-  --error: #ef4444;
-  --login-bg: radial-gradient(ellipse 120% 100% at 50% 50%, #1a2d4a 0%, #152238 35%, #0f172a 65%, #0a0f1a 100%);
-  --card-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --bg-card: #12182a;
+  --bg-card-border: rgba(255, 255, 255, 0.07);
+  --border: rgba(255, 255, 255, 0.09);
+  --text-primary: #f2f6fc;
+  --text-secondary: rgba(233, 240, 250, 0.72);
+  --text-muted: rgba(233, 240, 250, 0.42);
+  --accent-blue: #4f8ef7;
+  --accent-blue-strong: #6ba4ff;
+  --input-bg: rgba(255, 255, 255, 0.05);
+  --error: #f87171;
+  --login-bg: radial-gradient(ellipse 120% 100% at 50% 40%, #1b3157 0%, #142440 32%, #0d1626 62%, #080c14 100%);
+  --card-shadow: 0 30px 60px -24px rgba(0, 0, 0, 0.7);
+  /* Kartın sol üstünden gelen tek seferlik ışık (statik gradyan) */
+  --card-glow: radial-gradient(120% 120% at 0% 0%, rgba(79, 142, 247, 0.16) 0%, rgba(79, 142, 247, 0) 55%);
 }
 
 * {
@@ -30,6 +37,12 @@ html, body {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
 }
 
 .login-wrap {
@@ -39,77 +52,72 @@ html, body {
 }
 
 .login-card {
-  background: var(--bg-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  position: relative;
+  background-color: var(--bg-card);
+  background-image: var(--card-glow);
   border: 1px solid var(--bg-card-border);
   border-radius: 20px;
-  padding: 40px 36px;
+  padding: 36px 34px 30px;
   box-shadow: var(--card-shadow);
-  transition: box-shadow 0.3s ease;
+  overflow: hidden;
 }
 
-/* Düşük kaynaklı / eski sistemlerde blur pahalı; destek yoksa veya performans için daha opak arka plan */
-@supports not (backdrop-filter: blur(1px)) {
-  .login-card {
-    background: rgba(28, 32, 48, 0.92);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-}
-
-.login-card:hover {
-  box-shadow: 0 28px 56px -14px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06);
+/* Üstte ince vurgu çizgisi */
+.login-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(79, 142, 247, 0), var(--accent-blue), rgba(79, 142, 247, 0));
 }
 
 .login-header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 }
 
 .login-logo {
-  max-height: 160px;
+  max-height: 150px;
   width: auto;
-  margin-bottom: 20px;
+  margin: 0 auto 18px;
   display: block;
-  margin-left: auto;
-  margin-right: auto;
-  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.2));
 }
 
 .login-logo-fallback {
   display: none;
-  font-size: 56px;
+  font-size: 52px;
   font-weight: 700;
   letter-spacing: -0.5px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
-.login-logo-fallback .logo-ai { color: #60a5fa; }
+.login-logo-fallback .logo-ai { color: var(--accent-blue-strong); }
 .login-logo-fallback .logo-music { color: var(--text-primary); }
 
 .login-header h1 {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
-  margin-bottom: 6px;
+  margin-bottom: 5px;
   letter-spacing: -0.02em;
 }
 
 .login-header p {
-  font-size: 14px;
+  font-size: 13.5px;
   color: var(--text-secondary);
 }
 
 .login-form .field {
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .login-form label {
   display: block;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: 7px;
 }
 
 .login-form input[type="email"],
@@ -118,21 +126,26 @@ html, body {
   width: 100%;
   padding: 12px 14px;
   font-size: 15px;
+  font-family: inherit;
   background: var(--input-bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 11px;
   color: var(--text-primary);
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.16s linear, background-color 0.16s linear;
 }
 
 .login-form input::placeholder {
   color: var(--text-muted);
 }
 
+.login-form input:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
 .login-form input:focus {
-  border-color: rgba(59, 130, 246, 0.6);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  border-color: var(--accent-blue);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .password-wrap {
@@ -142,25 +155,28 @@ html, body {
 }
 
 .password-wrap input {
-  padding-right: 90px;
+  padding-right: 84px;
 }
 
 .btn-toggle-password {
   position: absolute;
-  right: 8px;
+  right: 7px;
   top: 50%;
   transform: translateY(-50%);
   background: none;
   border: none;
-  color: var(--accent-blue);
-  font-size: 13px;
+  color: var(--accent-blue-strong);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
   cursor: pointer;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
+  transition: background-color 0.15s linear;
 }
 
 .btn-toggle-password:hover {
-  background: rgba(59, 130, 246, 0.15);
+  background: rgba(79, 142, 247, 0.16);
 }
 
 .btn-toggle-password .icon-hide {
@@ -176,10 +192,14 @@ html, body {
 }
 
 .login-error {
-  font-size: 13px;
+  font-size: 12.5px;
+  line-height: 1.5;
   color: var(--error);
-  margin-bottom: 12px;
-  min-height: 20px;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
 }
 
 .login-error:empty {
@@ -189,35 +209,42 @@ html, body {
 .btn-login {
   width: 100%;
   padding: 14px;
-  font-size: 16px;
-  font-weight: 600;
-  color: white;
-  background: linear-gradient(180deg, #4f8ef7 0%, var(--accent-blue) 100%);
+  font-size: 15px;
+  font-weight: 700;
+  font-family: inherit;
+  color: #fff;
+  background: var(--accent-blue);
   border: none;
-  border-radius: 10px;
+  border-radius: 11px;
   cursor: pointer;
-  transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
-  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
+  transition: background-color 0.15s linear, transform 0.12s ease-out;
 }
 
 .btn-login:hover {
-  opacity: 0.95;
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+  background: var(--accent-blue-strong);
 }
 
 .btn-login:active {
-  transform: translateY(0);
+  transform: scale(0.99);
 }
 
 .btn-login:disabled {
-  opacity: 0.6;
+  background: rgba(79, 142, 247, 0.45);
   cursor: not-allowed;
+  transform: none;
 }
 
 .app-version {
   text-align: center;
-  margin-top: 28px;
-  font-size: 12px;
+  margin-top: 24px;
+  font-size: 11.5px;
   color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

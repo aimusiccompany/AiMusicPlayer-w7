@@ -1,36 +1,43 @@
-window.electronAPI.onUpdateReady((data) => {
-    const modal = document.getElementById('updateModal');
-    const versionSpan = document.getElementById('updateVersionText');
-    const installBtn = document.getElementById('btn-install-now');
-    const closeBtn = document.getElementById('btn-close-modal');
+/**
+ * Güncelleme modalı: main.js indirmeyi bitirince 'show-update-modal' gönderir.
+ * Not: Bu dosya package.json > build.files listesinde olmalı, aksi halde
+ * kurulu uygulamada 404 döner ve modal hiç açılmaz.
+ */
+(function () {
+  'use strict';
 
-    // Modal'ı göster
-    if (modal && versionSpan) {
-        versionSpan.innerText = data.version;
-        modal.style.display = 'flex';
-        modal.setAttribute('aria-hidden', 'false');
-    }
+  if (!window.electronAPI || typeof window.electronAPI.onUpdateReady !== 'function') return;
 
-    // Hemen Yükle için güvenli dinleyici
+  var modal = document.getElementById('updateModal');
+  var versionSpan = document.getElementById('updateVersionText');
+  var installBtn = document.getElementById('btn-install-now');
+  var closeBtn = document.getElementById('btn-close-modal');
+  if (!modal) return;
+
+  function closeModal() {
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  // Dinleyiciler bir kez bağlanır; her güncelleme olayında düğüm klonlamaya gerek yok.
+  if (installBtn) {
+    installBtn.addEventListener('click', function () {
+      installBtn.disabled = true;
+      installBtn.textContent = 'Yükleniyor…';
+      window.electronAPI.installUpdateNow();
+    });
+  }
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modal.getAttribute('aria-hidden') === 'false') closeModal();
+  });
+
+  window.electronAPI.onUpdateReady(function (data) {
+    if (versionSpan) versionSpan.textContent = (data && data.version) ? data.version : '';
+    modal.setAttribute('aria-hidden', 'false');
     if (installBtn) {
-        // Eski dinleyicileri temizlemek için (çakışmaları önler)
-        const newInstallBtn = installBtn.cloneNode(true);
-        installBtn.parentNode.replaceChild(newInstallBtn, installBtn);
-        
-        newInstallBtn.addEventListener('click', () => {
-            window.electronAPI.installUpdateNow();
-        });
+      installBtn.disabled = false;
+      installBtn.textContent = 'Hemen Yükle 🚀';
     }
-
-    // Kapatma butonu için güvenli dinleyici
-    if (closeBtn) {
-        const newCloseBtn = closeBtn.cloneNode(true);
-        closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
-        
-        newCloseBtn.addEventListener('click', () => {
-            modal.style.display = 'none';
-            modal.setAttribute('aria-hidden', 'true');
-            console.log('Modal kapatıldı.'); // Konsolda görebilmek için
-        });
-    }
-});
+  });
+})();

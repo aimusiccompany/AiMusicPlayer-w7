@@ -103,18 +103,40 @@
   })();
 
   // Güncelleme bildirimi: paketlenmiş uygulamada yeni sürüm bulunduğunda ekranda toast gösterilir
+  var updateToastHideTimer = null;
+  function showUpdateToast(text, autoHideMs) {
+    var toast = document.getElementById('update-toast');
+    if (!toast) return;
+    toast.textContent = text;
+    toast.setAttribute('aria-hidden', 'false');
+    toast.classList.add('update-toast--visible');
+    if (updateToastHideTimer) clearTimeout(updateToastHideTimer);
+    if (autoHideMs > 0) {
+      updateToastHideTimer = setTimeout(function () {
+        updateToastHideTimer = null;
+        toast.classList.remove('update-toast--visible');
+        toast.setAttribute('aria-hidden', 'true');
+      }, autoHideMs);
+    }
+  }
+
   if (window.electronAPI && typeof window.electronAPI.onUpdateAvailable === 'function') {
     window.electronAPI.onUpdateAvailable(function (data) {
       var v = (data && data.version) ? data.version : '';
-      var toast = document.getElementById('update-toast');
-      if (toast) {
-        toast.textContent = 'Yeni sürüm mevcut (v' + v + '). İndiriliyor… Uygulama kapatıldığında güncelleme kurulacak.';
-        toast.setAttribute('aria-hidden', 'false');
-        toast.classList.add('update-toast--visible');
-        setTimeout(function () {
-          toast.classList.remove('update-toast--visible');
-          toast.setAttribute('aria-hidden', 'true');
-        }, 8000);
+      showUpdateToast('Yeni sürüm mevcut (v' + v + '). İndiriliyor… Uygulama kapatıldığında güncelleme kurulacak.', 8000);
+    });
+  }
+
+  // İndirme yüzdesi: main.js 'auto-updater-channel' üzerinden gönderiyor.
+  if (window.electronAPI && typeof window.electronAPI.onUpdaterUpdate === 'function') {
+    window.electronAPI.onUpdaterUpdate(function (data) {
+      if (!data) return;
+      if (data.status === 'downloading' && data.percent != null) {
+        showUpdateToast('Güncelleme indiriliyor… %' + data.percent, 0);
+      } else if (data.status === 'downloaded') {
+        showUpdateToast('Güncelleme indirildi.', 4000);
+      } else if (data.status === 'error') {
+        showUpdateToast('Güncelleme alınamadı, daha sonra tekrar denenecek.', 6000);
       }
     });
   }
@@ -139,7 +161,41 @@
   };
 
   var currentView = 'playlist';
-  var likedSet = new Set();
+  // Listedeki arama kutusunun sorgusu (küçük harfe çevrilmiş, boşsa filtre yok)
+  var searchQuery = '';
+  // Beğeniler kalıcı: aksi halde her açılışta "Beğenilen Şarkılar" boş geliyordu.
+  var LIKED_STORAGE_KEY = 'aimusic-liked-songs';
+  var likedSet = loadLikedSet();
+
+  function loadLikedSet() {
+    try {
+      var raw = localStorage.getItem(LIKED_STORAGE_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr.map(String) : []);
+    } catch (_) {
+      return new Set();
+    }
+  }
+
+  function saveLikedSet() {
+    try { localStorage.setItem(LIKED_STORAGE_KEY, JSON.stringify(Array.from(likedSet))); } catch (_) {}
+  }
+
+  // Seçilen hoparlör de kalıcı olmalı; mağaza cihazı her açılışta varsayılana dönmesin.
+  var SINK_STORAGE_KEY = 'aimusic-speaker-id';
+
+  function getSavedSinkId() {
+    try { return localStorage.getItem(SINK_STORAGE_KEY) || 'default'; } catch (_) { return 'default'; }
+  }
+
+  function applySinkId(id) {
+    var audio = document.getElementById('app-audio');
+    if (!audio || typeof audio.setSinkId !== 'function') return;
+    audio.setSinkId(id).catch(function () {
+      // Cihaz artık takılı değilse varsayılana dön.
+      if (id !== 'default') audio.setSinkId('default').catch(function () {});
+    });
+  }
 
   // Standart reklamlarda görsel yok; listede boş kalmasın diye logo
   var AD_LOGO_URL = 'assets/ai-music-logo.png';
@@ -181,30 +237,62 @@
         }
       });
     }
+    if (searchQuery) {
+      var currentRef = currentIndexInList >= 0 ? list[currentIndexInList] : null;
+      list = list.filter(function (item) {
+        return matchesSearch(item, searchQuery);
+      });
+      currentIndexInList = currentRef ? list.indexOf(currentRef) : -1;
+    }
     return { list: list, currentIndexInList: currentIndexInList };
   }
 
-  function updateContentHeader(view, s) {
+  // Türkçe karakterlerde doğru küçük harf için toLocaleLowerCase('tr') kullanılır.
+  function normalizeForSearch(value) {
+    return String(value == null ? '' : value).toLocaleLowerCase('tr');
+  }
+
+  function matchesSearch(item, query) {
+    if (!item) return false;
+    var haystack = normalizeForSearch(item.title) + ' ' +
+      normalizeForSearch(item.artist) + ' ' +
+      normalizeForSearch(item.genre) + ' ' +
+      normalizeForSearch(item.tag) + ' ' +
+      normalizeForSearch(item.time);
+    return haystack.indexOf(query) !== -1;
+  }
+
+  // "09:35" → 575 (gün içi dakika). Ayrıştırılamazsa null.
+  function timeToMinutes(value) {
+    var m = /^(\d{1,2}):(\d{2})/.exec(String(value == null ? '' : value).trim());
+    if (!m) return null;
+    return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  }
+
+  function updateContentHeader(view, s, filteredCount) {
     var headingEl = document.getElementById('content-heading');
     var countEl = document.getElementById('content-count');
-    var countWrap = countEl && countEl.closest ? countEl : null;
     if (headingEl) {
-      if (view === 'playlist') headingEl.textContent = 'Çalma Listesi';
+      if (view === 'playlist') headingEl.textContent = 'Yayın Akışı';
       else if (view === 'ads') headingEl.textContent = 'Reklamlarım';
       else headingEl.textContent = 'Beğenilen Şarkılar';
     }
-    if (countEl) {
-      if (view === 'playlist') {
-        countEl.textContent = String(s.playlist.length) + ' parça';
-        countEl.style.display = '';
-      } else if (view === 'ads') {
-        countEl.style.display = 'none';
-      } else {
-        var favIds = new Set();
-        s.playlist.forEach(function (item) { if (item.recordType === 'song' && likedSet.has(String(item.id))) favIds.add(String(item.id)); });
-        countEl.textContent = String(favIds.size) + ' beğeni';
-        countEl.style.display = '';
-      }
+    if (!countEl) return;
+    if (searchQuery) {
+      countEl.textContent = String(filteredCount == null ? 0 : filteredCount) + ' sonuç';
+      countEl.style.display = '';
+      return;
+    }
+    if (view === 'playlist') {
+      countEl.textContent = String(s.playlist.length) + ' parça';
+      countEl.style.display = '';
+    } else if (view === 'ads') {
+      countEl.style.display = 'none';
+    } else {
+      var favIds = new Set();
+      s.playlist.forEach(function (item) { if (item.recordType === 'song' && likedSet.has(String(item.id))) favIds.add(String(item.id)); });
+      countEl.textContent = String(favIds.size) + ' beğeni';
+      countEl.style.display = '';
     }
   }
 
@@ -261,9 +349,10 @@
     }
     var loadingEl = document.getElementById('playlist-loading');
     if (loadingEl) loadingEl.setAttribute('aria-hidden', 'true');
-    updateContentHeader(currentView, s);
     var center = getCenterList(s);
-    var playlistKey = currentView + '|' + (s.currentTrackIndex >= 0 ? s.currentTrackIndex : -1) + '|' + (s.playlist ? s.playlist.length : 0) + '|' + (s.playlist && s.playlist[0] ? s.playlist[0].id : '');
+    updateContentHeader(currentView, s, center.list.length);
+    updateEmptyState(center.list.length);
+    var playlistKey = currentView + '|' + searchQuery + '|' + (s.currentTrackIndex >= 0 ? s.currentTrackIndex : -1) + '|' + (s.playlist ? s.playlist.length : 0) + '|' + (s.playlist && s.playlist[0] ? s.playlist[0].id : '');
     if (playlistKey !== window._lastPlaylistKey) {
       window._lastPlaylistKey = playlistKey;
       var list = center.list;
@@ -375,7 +464,36 @@
     }
     if (curEl) curEl.textContent = formatTime(displayCurrent);
     if (totEl) totEl.textContent = formatTime(displayDuration);
-    if (fillEl) fillEl.style.width = (displayDuration > 0 ? (displayCurrent / displayDuration) * 100 : 0) + '%';
+    var progressPct = (displayDuration > 0 ? (displayCurrent / displayDuration) * 100 : 0);
+    if (fillEl) fillEl.style.width = progressPct + '%';
+    var heroFill = document.getElementById('np-progress-fill');
+    if (heroFill) heroFill.style.width = progressPct + '%';
+    var remainEl = document.getElementById('np-remaining');
+    if (remainEl) {
+      var remain = displayDuration > 0 ? Math.max(0, displayDuration - displayCurrent) : 0;
+      remainEl.textContent = (streamActive && displayDuration > 0) ? formatTime(remain) + ' kaldı' : '';
+    }
+
+    // Hero: sıradaki kayıt (akış listesinden, yoksa VP'nin upcomingSchedule'ından)
+    var nextRecord = null;
+    if (s.playlist && s.currentTrackIndex >= 0 && s.playlist[s.currentTrackIndex + 1]) {
+      nextRecord = s.playlist[s.currentTrackIndex + 1];
+    } else if (s.upcomingSchedule && s.upcomingSchedule.length) {
+      nextRecord = s.upcomingSchedule[0];
+    }
+    var npNext = document.getElementById('np-next');
+    var npNextTitle = document.getElementById('np-next-title');
+    var npNextTime = document.getElementById('np-next-time');
+    if (npNext && npNextTitle) {
+      var nextTitle = nextRecord ? (nextRecord.title || nextRecord.name || '') : '';
+      if (nextTitle) {
+        npNextTitle.textContent = nextTitle;
+        if (npNextTime) npNextTime.textContent = nextRecord.time ? String(nextRecord.time).slice(0, 5) : '';
+        npNext.setAttribute('aria-hidden', 'false');
+      } else {
+        npNext.setAttribute('aria-hidden', 'true');
+      }
+    }
 
     // Reklam sayısı
     const adsCountEl = document.getElementById('ads-count');
@@ -419,9 +537,20 @@
       el.innerHTML = '';
       return;
     }
-    el.innerHTML = list.map(function (track, i) {
-      const playingClass = i === currentIndex ? ' playing' : '';
-      var fullIdx = track.fullIndex != null ? track.fullIndex : i;
+    // Saat ayraçları: yayın akışı bir gün boyunca sürdüğü için satırlar saat
+    // bloklarına ayrılır. Beğeniler görünümü kronolojik olmadığından ayraç yok.
+    var useHourGroups = currentView !== 'favorites' && !searchQuery;
+    var currentHour = null;
+    if (currentIndex >= 0 && list[currentIndex]) {
+      var ch = /^(\d{1,2}):/.exec(String(list[currentIndex].time || ''));
+      if (ch) currentHour = ('0' + ch[1]).slice(-2);
+    }
+    var lastHour = null;
+    var parts = [];
+    for (var i = 0; i < list.length; i++) {
+      var track = list[i];
+      const playingClass = i === currentIndex ? ' playing' :
+        (currentIndex >= 0 && i < currentIndex ? ' played' : '');
       var dataFull = track.fullIndex != null ? ' data-full-index="' + track.fullIndex + '"' : '';
       const title = escapeHtml(track.title || '—');
       const artist = escapeHtml(track.artist || track.genre || '—');
@@ -441,7 +570,22 @@
       var actionsHtml = isSong
         ? '<div class="track-actions"><button type="button" class="btn-like' + likedClass + '" title="Beğen">♥</button><button type="button" class="btn-dislike" title="Beğenme">♡</button></div>'
         : '<div class="track-actions track-actions--no-buttons"></div>';
-      return '<li class="track-item' + playingClass + '" data-index="' + i + '"' + dataFull + '>' +
+
+      if (useHourGroups) {
+        var hour = /^(\d{1,2}):/.exec(String(track.time || ''));
+        var hourKey = hour ? ('0' + hour[1]).slice(-2) : null;
+        if (hourKey && hourKey !== lastHour) {
+          lastHour = hourKey;
+          var isCurrentHour = currentHour != null && hourKey === currentHour;
+          parts.push('<li class="hour-sep' + (isCurrentHour ? ' hour-sep--now' : '') + '" aria-hidden="true">' +
+            '<span class="hour-sep-time">' + hourKey + ':00</span>' +
+            '<span class="hour-sep-line"></span>' +
+            (isCurrentHour ? '<span class="hour-sep-now">ŞU AN</span>' : '') +
+            '</li>');
+        }
+      }
+
+      parts.push('<li class="track-item' + playingClass + '" data-index="' + i + '"' + dataFull + '>' +
         '<span class="track-num">' + num + '</span>' +
         '<div class="track-art">' + art + '</div>' +
         '<div><span class="track-title">' + title + '</span><span class="track-artist">' + artist + '</span></div>' +
@@ -449,8 +593,9 @@
         '<span class="track-duration">' + duration + '</span>' +
         '<span class="track-tag track-tag--' + escapeHtml(slug) + '">' + tagLabel + '</span>' +
         actionsHtml +
-        '</li>';
-    }).join('');
+        '</li>');
+    }
+    el.innerHTML = parts.join('');
     el.querySelectorAll('.track-item').forEach(function (li) {
       li.addEventListener('click', function (e) {
         if (e.target.closest('.track-actions')) return;
@@ -468,13 +613,14 @@
           if (t.recordType === 'song') {
             var id = String(t.id);
             if (likedSet.has(id)) likedSet.delete(id); else likedSet.add(id);
+            saveLikedSet();
             this.classList.toggle('liked', likedSet.has(id));
             var dis = li.querySelector('.btn-dislike');
             if (dis) dis.classList.remove('disliked');
-            updateContentHeader(currentView, window.playerState);
+            var centerAfterLike = getCenterList(window.playerState);
+            updateContentHeader(currentView, window.playerState, centerAfterLike.list.length);
             if (currentView === 'favorites') {
-              var center = getCenterList(window.playerState);
-              renderPlaylist(center.list, center.currentIndexInList);
+              renderPlaylist(centerAfterLike.list, centerAfterLike.currentIndexInList);
             }
           }
         } else {
@@ -484,23 +630,53 @@
       });
     });
     el.querySelectorAll('.btn-dislike').forEach(function (btn) {
-      btn.addEventListener('click', function (e) { e.stopPropagation(); this.classList.toggle('disliked'); this.closest('li').querySelector('.btn-like').classList.remove('liked'); });
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        this.classList.toggle('disliked');
+        var li = this.closest('li');
+        if (!li) return;
+        var likeBtn = li.querySelector('.btn-like');
+        if (likeBtn) likeBtn.classList.remove('liked');
+        // Kalp işaretini kaldırmak yetmiyordu: parça likedSet'te kalıyor ve
+        // "Beğenilen Şarkılar" listesinde görünmeye devam ediyordu.
+        var fullIdx = li.dataset.fullIndex != null ? parseInt(li.dataset.fullIndex, 10) : -1;
+        var t = fullIdx >= 0 && window.playerState ? window.playerState.playlist[fullIdx] : null;
+        if (!t || t.recordType !== 'song') return;
+        if (!likedSet.delete(String(t.id))) return;
+        saveLikedSet();
+        var centerAfterDislike = getCenterList(window.playerState);
+        updateContentHeader(currentView, window.playerState, centerAfterDislike.list.length);
+        if (currentView === 'favorites') {
+          renderPlaylist(centerAfterDislike.list, centerAfterDislike.currentIndexInList);
+        }
+      });
     });
+    // Çalan parça değişmediyse kaydırma; aksi halde kullanıcı listede gezerken
+    // her yeniden çizimde görünüm başa atlıyordu.
     var playingLi = currentIndex >= 0 ? el.querySelector('.track-item.playing') : null;
-    if (playingLi && typeof playingLi.scrollIntoView === 'function') {
+    var scrollKey = currentView + '|' + currentIndex;
+    if (playingLi && typeof playingLi.scrollIntoView === 'function' && scrollKey !== window._lastScrollKey) {
+      window._lastScrollKey = scrollKey;
       playingLi.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     // CSP uyumu: dinamik eklenen img'lere fallback (inline onerror güvenlik nedeniyle çalışmayabilir)
     setupImageFallbacks();
   }
 
+  // Anonslar cihaz saatine göre "yayınlandı / yayında / sırada" olarak işaretlenir;
+  // mağaza sahibi hangi reklamının çaldığını listeye bakarak görebilsin.
   function renderAds(ads) {
     const el = document.getElementById('ads-list');
     if (!el) return;
     if (!ads || ads.length === 0) {
       el.innerHTML = '';
+      window._lastAdsStatusKey = null;
       return;
     }
+    var now = new Date();
+    var nowMin = now.getHours() * 60 + now.getMinutes();
+    var upNextMarked = false;
+    var doneCount = 0;
     el.innerHTML = ads.map(function (ad, i) {
       var num = ad.num != null ? ad.num : i + 1;
       var title = escapeHtml(ad.title || '—');
@@ -508,11 +684,49 @@
       var startTime = ad.time || '—';
       var tag = escapeHtml(ad.tag || 'Anons');
       var slug = (ad.tagSlug || 'reklam').replace(/\s+/g, '-');
-      return '<li>' +
-        '<div class="ad-top"><span class="ad-num">' + num + '</span> <span class="ad-title">' + title + '</span></div>' +
-        '<div class="ad-tag-row"><span class="ad-tag-pill ad-tag-pill--' + escapeHtml(slug) + '">' + tag + '</span><span class="ad-meta-pill">Süre: ' + escapeHtml(String(duration)) + ' | ' + escapeHtml(String(startTime)) + '</span></div>' +
+
+      var startMin = timeToMinutes(ad.time);
+      var state = 'next';
+      if (startMin != null) {
+        var endMin = startMin + Math.max(1, Math.ceil((Number(ad.duration) || 0) / 60));
+        if (nowMin >= startMin && nowMin < endMin) {
+          state = 'live';
+        } else if (nowMin >= endMin) {
+          state = 'past';
+          doneCount++;
+        }
+      }
+      // Rozet gürültü yapmasın: yalnızca çalan ve sıradaki anons etiketlenir,
+      // yayınlananlar zaten sönük görünür.
+      var upNext = '';
+      var stateLabel = '';
+      if (state === 'live') {
+        stateLabel = 'Yayında';
+      } else if (state === 'next' && !upNextMarked) {
+        upNextMarked = true;
+        upNext = ' ad-item--upnext';
+        stateLabel = 'Sıradaki';
+      }
+
+      return '<li class="ad-item ad-item--' + state + upNext + '">' +
+        '<div class="ad-rail" aria-hidden="true"></div>' +
+        '<div class="ad-body">' +
+        '<div class="ad-top">' +
+        '<span class="ad-num">' + num + '</span> <span class="ad-title">' + title + '</span>' +
+        (stateLabel ? '<span class="ad-state-pill">' + stateLabel + '</span>' : '') +
+        '</div>' +
+        '<div class="ad-tag-row">' +
+        '<span class="ad-tag-pill ad-tag-pill--' + escapeHtml(slug) + '">' + tag + '</span>' +
+        '<span class="ad-meta-pill">' + escapeHtml(String(startTime)) + ' · ' + escapeHtml(String(duration)) + '</span>' +
+        '</div>' +
+        '</div>' +
         '</li>';
     }).join('');
+
+    var progressEl = document.getElementById('ads-progress-fill');
+    if (progressEl) progressEl.style.width = (ads.length ? (doneCount / ads.length) * 100 : 0) + '%';
+    var progressTextEl = document.getElementById('ads-progress-text');
+    if (progressTextEl) progressTextEl.textContent = doneCount + ' / ' + ads.length + ' yayınlandı';
   }
 
   function escapeHtml(s) {
@@ -527,11 +741,65 @@
       var view = this.getAttribute('data-view');
       currentView = view;
       setActiveNavView(view);
-      updateContentHeader(view, window.playerState);
-      var center = getCenterList(window.playerState);
-      renderPlaylist(center.list, center.currentIndexInList);
+      renderCenterList();
     });
   });
+
+  // Listeyi mevcut görünüm + arama sorgusuna göre yeniden çizer.
+  function renderCenterList() {
+    var center = getCenterList(window.playerState);
+    updateContentHeader(currentView, window.playerState, center.list.length);
+    renderPlaylist(center.list, center.currentIndexInList);
+    updateEmptyState(center.list.length);
+  }
+
+  // Liste boşsa nedenine göre bilgi mesajı göster.
+  function updateEmptyState(count) {
+    var emptyEl = document.getElementById('playlist-empty');
+    if (!emptyEl) return;
+    var isEmpty = count === 0 && window._playlistDataReceived;
+    emptyEl.setAttribute('aria-hidden', isEmpty ? 'false' : 'true');
+    if (!isEmpty) return;
+    var textEl = document.getElementById('playlist-empty-text');
+    if (!textEl) return;
+    if (searchQuery) textEl.textContent = 'Aramanızla eşleşen kayıt yok';
+    else if (currentView === 'favorites') textEl.textContent = 'Henüz beğendiğiniz şarkı yok';
+    else if (currentView === 'ads') textEl.textContent = 'Yayın akışında anons yok';
+    else textEl.textContent = 'Yayın akışı boş';
+  }
+
+  // ——— Liste araması ———
+  (function setupSearch() {
+    var input = document.getElementById('playlist-search');
+    var clearBtn = document.getElementById('playlist-search-clear');
+    if (!input) return;
+    var timer = null;
+    function apply(value) {
+      if (value === searchQuery) return;
+      searchQuery = value;
+      if (clearBtn) clearBtn.setAttribute('aria-hidden', value ? 'false' : 'true');
+      // Önbellek anahtarını sıfırla ki bir sonraki state güncellemesi listeyi yeniden çizsin.
+      window._lastPlaylistKey = null;
+      renderCenterList();
+    }
+    input.addEventListener('input', function () {
+      var value = normalizeForSearch(this.value).trim();
+      if (timer) clearTimeout(timer);
+      // Yazarken her tuşta yeniden çizmemek için kısa gecikme (düşük CPU).
+      timer = setTimeout(function () { timer = null; apply(value); }, 180);
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' || e.keyCode === 27) { this.value = ''; if (timer) clearTimeout(timer); apply(''); }
+    });
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        input.value = '';
+        if (timer) clearTimeout(timer);
+        apply('');
+        input.focus();
+      });
+    }
+  })();
 
   document.getElementById('settings-refresh-playlist')?.addEventListener('click', function () {
     if (window.requestVPRefresh) window.requestVPRefresh();
@@ -558,6 +826,14 @@
     var greeting = (h >= 0 && h < 6) ? 'İyi geceler' : (h >= 18) ? 'İyi Akşamlar' : 'İyi Günler';
     var gEl = document.getElementById('now-playing-greeting');
     if (gEl) gEl.textContent = greeting;
+    // Anons durumları (yayınlandı/yayında/sırada) dakikada bir tazelenir.
+    var minuteKey = h * 60 + now.getMinutes();
+    if (minuteKey !== window._lastAdsMinute) {
+      window._lastAdsMinute = minuteKey;
+      if (window.playerState && window.playerState.ads && window.playerState.ads.length) {
+        renderAds(window.playerState.ads);
+      }
+    }
   }
   updateSidebarClock();
   setInterval(updateSidebarClock, 1000);
@@ -627,7 +903,7 @@
       if (speakerSelect && navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
         navigator.mediaDevices.enumerateDevices().then(function (devices) {
           var outputs = devices.filter(function (d) { return d.kind === 'audiooutput'; });
-          var savedId = speakerSelect.dataset.sinkId || 'default';
+          var savedId = getSavedSinkId();
           speakerSelect.innerHTML = '<option value="default">Varsayılan</option>';
           outputs.forEach(function (d) {
             var opt = document.createElement('option');
@@ -655,13 +931,13 @@
   if (speakerSelect) {
     speakerSelect.addEventListener('change', function () {
       var id = this.value;
-      speakerSelect.dataset.sinkId = id;
-      var audio = document.getElementById('app-audio');
-      if (audio && typeof audio.setSinkId === 'function') {
-        audio.setSinkId(id).catch(function () {});
-      }
+      // dataset'te tutulduğu için seçim her yeniden başlatmada varsayılana dönüyordu.
+      try { localStorage.setItem(SINK_STORAGE_KEY, id); } catch (_) {}
+      applySinkId(id);
     });
   }
+  // Kayıtlı hoparlör seçimini açılışta uygula
+  applySinkId(getSavedSinkId());
 
   // İletişim modal
   var contactOverlay = document.getElementById('contact-overlay');
@@ -687,6 +963,14 @@
       window.open(contactWhatsAppUrl, '_blank');
     }
   });
+  // Esc ile açık modalları kapat
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    [settingsOverlay, contactOverlay].forEach(function (ov) {
+      if (ov && ov.getAttribute('aria-hidden') === 'false') ov.setAttribute('aria-hidden', 'true');
+    });
+  });
+
   document.getElementById('contact-mail')?.addEventListener('click', function () {
     if (window.electronAPI && window.electronAPI.openExternal) {
       window.electronAPI.openExternal(contactMailUrl);
@@ -881,7 +1165,12 @@
       if (curEl) curEl.textContent = formatTime(appAudio.currentTime);
       var dur = window._trackDurationSec != null ? window._trackDurationSec : (appAudio.duration && !isNaN(appAudio.duration) ? appAudio.duration : 0);
       if (totEl) totEl.textContent = formatTime(dur);
-      if (fillEl) fillEl.style.width = (dur > 0 ? (appAudio.currentTime / dur) * 100 : 0) + '%';
+      var pct = (dur > 0 ? (appAudio.currentTime / dur) * 100 : 0);
+      if (fillEl) fillEl.style.width = pct + '%';
+      var heroFillEl = document.getElementById('np-progress-fill');
+      if (heroFillEl) heroFillEl.style.width = pct + '%';
+      var remainingEl = document.getElementById('np-remaining');
+      if (remainingEl) remainingEl.textContent = dur > 0 ? formatTime(Math.max(0, dur - appAudio.currentTime)) + ' kaldı' : '';
     });
     appAudio.addEventListener('ended', function () {
       clearTimeout(window._pendingActiveRecordTimeout);
@@ -935,13 +1224,22 @@
   updateUIFromState();
 
   // Root: Virtual Player'ı userId ile başlat (Provider benzeri akış)
-  if (window.userId && typeof window.initVirtualPlayer === 'function') {
+  // VP paketi app.js sonunda requestAnimationFrame ile ertelenmiş çalışıyor. Oturum
+  // yerel önbellekten hızlı gelirse initVirtualPlayer henüz tanımlı olmayabiliyordu ve
+  // tek seferlik kontrol sessizce başarısız olup çalma listesi boş kalıyordu.
+  var vpStarted = false;
+  function startVirtualPlayer() {
+    if (vpStarted || !window.userId || typeof window.initVirtualPlayer !== 'function') return;
+    vpStarted = true;
     window.initVirtualPlayer(window.userId).then(function () {
       updateUIFromState();
     }).catch(function (err) {
+      vpStarted = false;
       console.warn('Virtual Player init:', err);
     });
   }
+  window.addEventListener('vp-ready', startVirtualPlayer);
+  startVirtualPlayer();
   }
 
   function runApp() {

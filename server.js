@@ -65,6 +65,8 @@ function serve(appPath, port) {
 
   return new Promise((resolve, reject) => {
     const onError = (err) => {
+      // Bağlanamayan sunucu nesnesini bırakma; çağıran sıradaki portu deneyecek.
+      try { server.close(); } catch (_) {}
       reject(err);
     };
     server.once('error', onError);
