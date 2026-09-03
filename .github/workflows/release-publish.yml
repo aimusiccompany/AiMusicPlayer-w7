@@ -35,15 +35,18 @@ jobs:
       - name: Configure npm for GitHub Packages
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TOKEN="${NPM_TOKEN:-$GITHUB_TOKEN}"
-          if [ -z "$TOKEN" ]; then
-            echo "Missing token for GitHub Packages (NPM_TOKEN or GITHUB_TOKEN)."
+          # GITHUB_TOKEN yedegi kaldirildi: bu repo aimusiccompany altinda, paket ise
+          # ai-music-corp org'una ait. Repo kapsamli GITHUB_TOKEN baska bir org'un
+          # paketlerine hicbir zaman erisemez; yedek olarak kullanildiginda net bir
+          # "token yok" hatasi yerine kafa karistirici bir 401 uretiyordu.
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret'i tanimli degil."
+            echo "::error::@ai-music-corp paketleri icin read:packages kapsamli bir GitHub PAT gerekiyor."
             exit 1
           fi
           echo "@ai-music-corp:registry=https://npm.pkg.github.com/" >> .npmrc
-          echo "//npm.pkg.github.com/:_authToken=$TOKEN" >> .npmrc
+          echo "//npm.pkg.github.com/:_authToken=$NPM_TOKEN" >> .npmrc
 
       - name: Set version in package.json
         env:
