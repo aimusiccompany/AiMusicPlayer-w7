@@ -353,6 +353,10 @@ async function initVirtualPlayer(userId) {
 
   // Çalma listesini hızlandır: ilk syncState gelmeden schedule'ı arka planda hesapla
   const doPrefetch = () => {
+    // syncState araya girip listeyi zaten hesapladıysa tekrar hesaplama:
+    // her hesaplama 24 saatlik senkron simülasyon, yani ikinci bir donma demek.
+    if (Array.isArray(_scheduleCache) && _scheduleCache.length > 0) return
+    if (Array.isArray(_scheduleCachePrefetch) && _scheduleCachePrefetch.length > 0) return
     try {
       const fresh = getUpcomingSchedule(player)
       if (fresh && fresh.length > 0) _scheduleCachePrefetch = fresh
@@ -467,7 +471,13 @@ async function initVirtualPlayer(userId) {
     setTimeout(syncState, 1500)
     setInterval(syncState, 1000)
     setInterval(function () {
-      _scheduleCacheTime = 0
+      // DİKKAT: burada _scheduleCacheTime = 0 yazılıyordu. 0 falsy olduğu için
+      // getUpcomingScheduleCached'deki `cacheExpired` kontrolü false kalıyor,
+      // ertelenmiş yenileme yolu atlanıyor ve fastForwardTo(DAY) — yani 24
+      // saatlik simülasyon — ana iş parçacığında senkron çalışıyordu. Sonuç:
+      // her 5 dakikada bir arayüz (saat dahil) donuyordu.
+      // 1 yazınca cache "çok eski" sayılır ve yenileme requestIdleCallback'e alınır.
+      _scheduleCacheTime = 1
       syncState()
     }, 5 * 60 * 1000)
     return player

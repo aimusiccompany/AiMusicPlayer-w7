@@ -309,6 +309,16 @@
 
   function initAuthAndRun() {
   window._playlistDataReceived = false;
+  // O gün için gerçekten program yoksa "hazırlanıyor" mesajı sonsuza kadar
+  // kalmasın; belli bir süre sonra normal boş duruma düş.
+  if (window._playlistWaitTimer) clearTimeout(window._playlistWaitTimer);
+  window._playlistWaitTimer = setTimeout(function () {
+    window._playlistWaitTimer = null;
+    if (!window._playlistDataReceived) {
+      window._playlistDataReceived = true;
+      updateUIFromState();
+    }
+  }, 45000);
   var uiUpdateScheduled = false;
   function scheduleUIUpdate() {
     if (uiUpdateScheduled) return;
@@ -1110,7 +1120,14 @@
       var pl = e.detail.playlist;
       var plSig = pl && pl.length ? pl.length + '-' + (pl[0] && pl[0].id) + '-' + (pl[pl.length - 1] && pl[pl.length - 1].id) : '';
       if (plSig !== undefined) window._lastPlaylistSignature = plSig;
-      if (!window._playlistDataReceived) window._playlistDataReceived = true;
+      // İlk kez giriş yapan işletmelerde VP, akış daha hazır değilken boş liste
+      // ile birkaç kez tetikleniyor. Bunu "veri geldi" saymak, "hazırlanıyor"
+      // mesajını erkenden kapatıp yerine boş liste gösteriyordu. Gerçekten
+      // içerik geldiğinde işaretle; akış cidden boşsa aşağıdaki zaman aşımı devreye girer.
+      if (!window._playlistDataReceived && pl && pl.length > 0) {
+        window._playlistDataReceived = true;
+        if (window._playlistWaitTimer) { clearTimeout(window._playlistWaitTimer); window._playlistWaitTimer = null; }
+      }
       if (!pl || pl.length === 0) {
         var indEmpty = document.getElementById('playlist-update-indicator');
         if (indEmpty) indEmpty.setAttribute('aria-hidden', 'true');

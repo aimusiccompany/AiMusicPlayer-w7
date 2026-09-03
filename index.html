@@ -114,9 +114,16 @@
             <span class="playlist-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
             <p class="playlist-empty-text" id="playlist-empty-text">Sonuç bulunamadı</p>
           </div>
-          <div class="playlist-loading" id="playlist-loading" aria-hidden="false">
-            <div class="playlist-loading-spinner" aria-label="Çalma listesi yükleniyor"></div>
-            <p class="playlist-loading-text">Çalma listesi yükleniyor…</p>
+          <div class="playlist-loading" id="playlist-loading" role="status" aria-hidden="false">
+            <div class="broadcast-prep" aria-hidden="true">
+              <span class="broadcast-prep-wave"></span>
+              <span class="broadcast-prep-wave"></span>
+              <span class="broadcast-prep-tower">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><circle cx="12" cy="8" r="2"/><path d="m9 22 3-12 3 12"/><path d="M10.2 18h3.6"/><path d="M5.5 5.5a9 9 0 0 0 0 9"/><path d="M18.5 5.5a9 9 0 0 1 0 9"/></svg>
+            </span>
+            </div>
+            <p class="playlist-loading-text">İşletmenize özel yayın akışınız hazırlanıyor. Lütfen bekleyiniz.</p>
+            <span class="playlist-loading-eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
           </div>
         </div>
       </section>
