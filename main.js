@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Tray, Menu, powerSaveBlocker } = require('electron');
 const path = require('path');
 const { serve } = require('./server.js');
 
@@ -98,6 +98,19 @@ function setupAutoLaunch() {
     });
   } catch (e) {
     console.log('[AutoLaunch ERROR]: ' + (e && e.message ? e.message : String(e)));
+  }
+}
+
+// ——— Güç yönetimi ———
+// Windows uygulamayı askıya alırsa yayın durur. Yalnızca uygulama askıya almasını
+// engelliyoruz; ekranın uyumasına karışmıyoruz (mağaza ekranı kapanabilir, ses sürer).
+let powerSaveBlockerId = null;
+function setupPowerSaveBlocker() {
+  try {
+    if (powerSaveBlockerId != null && powerSaveBlocker.isStarted(powerSaveBlockerId)) return;
+    powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+  } catch (e) {
+    console.log('[PowerSaveBlocker ERROR]: ' + (e && e.message ? e.message : String(e)));
   }
 }
 
@@ -262,7 +275,16 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400, height: 900, minWidth: 1024, minHeight: 640, autoHideMenuBar: true,
     show: false,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      // KRİTİK: pencere tepsiye indiğinde gizli sayılır ve Chromium varsayılan
+      // olarak setInterval/setTimeout'ları kısar. Yayın senkronizasyonu (VP
+      // simülasyonu, syncState, parça geçişleri) tamamen zamanlayıcılara dayandığı
+      // için kısma olursa akış kayar. Arka planda da tam hızda çalışmalı.
+      backgroundThrottling: false
+    },
     title: 'AI Music Player - ' + zoneName, backgroundColor: '#121212'
   });
 
@@ -310,6 +332,7 @@ function bootstrap() {
       createWindow();
       createTray();
       setupAutoLaunch();
+      setupPowerSaveBlocker();
       setupAutoUpdater();
     });
   }).catch((err) => {

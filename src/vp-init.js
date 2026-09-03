@@ -268,39 +268,63 @@ function getUpcomingScheduleCached(player) {
   const cacheValid = key === _scheduleCacheKey && Array.isArray(_scheduleCache)
   const cacheExpired = _scheduleCacheTime && now - _scheduleCacheTime > CACHE_TTL_MS
   if (cacheValid && !cacheExpired) return _scheduleCache
-  if (cacheExpired && cacheValid && !_scheduleRefreshScheduled) {
-    _scheduleRefreshScheduled = true
-    const doRefresh = () => {
-      try {
-        const fresh = getUpcomingSchedule(player)
-        if (fresh && fresh.length > 0) {
-          _scheduleCache = _mergeEarlyFromCache(fresh)
-          _scheduleCacheTime = Date.now()
-          if (typeof window !== 'undefined' && window.requestVPSync) window.requestVPSync()
-        }
-      } catch (_) { /* önbelleği koru */ }
-      _scheduleRefreshScheduled = false
-    }
-    if (typeof requestIdleCallback !== 'undefined') {
-      requestIdleCallback(doRefresh, { timeout: 3000 })
-    } else {
-      setTimeout(doRefresh, 50)
+
+  // Ekranda gösterilecek bir liste zaten varsa, 24 saatlik simülasyonu ASLA ana
+  // iş parçacığında çalıştırma. Bu hem TTL dolduğunda hem de programın gerçekten
+  // değiştiği durumda geçerli: mevcut liste gösterilmeye devam eder, yeni liste
+  // boşta hesaplanır ve hazır olunca requestVPSync ile devreye girer.
+  // (Önceden program değişiminde senkron hesaplanıyor ve arayüz donuyordu.)
+  // DİKKAT: burada `length > 0` aranmamalı. Bir kez hesaplandıysa (sonuç boş bile
+  // olsa) artık ana iş parçacığında tekrar hesaplamıyoruz. Önceden boş sonuç
+  // önbelleğe yazılmadığı için, o gün programı olmayan bir işletmede syncState'in
+  // her saniyelik turunda yeniden 24 saatlik simülasyon çalışıyor ve arayüz
+  // sürekli donuyordu.
+  const hasCache = Array.isArray(_scheduleCache)
+  if (hasCache) {
+    if (!_scheduleRefreshScheduled) {
+      _scheduleRefreshScheduled = true
+      // Anahtarı yalnızca yenileme planlarken yaz. Zaten bir yenileme sürüyorsa
+      // anahtar eski kalır; böylece o yenileme bitince değişiklik tekrar yakalanır.
+      _scheduleCacheKey = key
+      const doRefresh = () => {
+        try {
+          const fresh = getUpcomingSchedule(player)
+          if (fresh && fresh.length > 0) {
+            _scheduleCache = _mergeEarlyFromCache(fresh)
+            if (typeof window !== 'undefined' && window.requestVPSync) window.requestVPSync()
+          }
+        } catch (_) { /* önbelleği koru */ }
+        // Sonuç boş ya da hatalı olsa da zaman damgasını yenile: aksi halde
+        // cacheExpired sürekli true kalır ve her saniye yeni bir 24 saatlik
+        // simülasyon planlanır (boşta da olsa CPU'yu sürekli meşgul eder).
+        _scheduleCacheTime = Date.now()
+        _scheduleRefreshScheduled = false
+      }
+      if (typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(doRefresh, { timeout: 3000 })
+      } else {
+        setTimeout(doRefresh, 50)
+      }
     }
     return _scheduleCache
   }
+
+  // Buraya yalnızca hayatta bir kez, hiç hesaplanmamışken gelinir.
+  // "Yayın akışınız hazırlanıyor" mesajı bu sırada ekranda duruyor.
   _scheduleCacheKey = key
+  _scheduleCacheTime = now
   if (Array.isArray(_scheduleCachePrefetch) && _scheduleCachePrefetch.length > 0) {
     _scheduleCache = _mergeEarlyFromCache(_scheduleCachePrefetch)
     _scheduleCachePrefetch = null
-    _scheduleCacheTime = now
     return _scheduleCache
   }
-  const fresh = getUpcomingSchedule(player)
-  if (fresh && fresh.length > 0) {
-    _scheduleCache = _mergeEarlyFromCache(fresh)
-    _scheduleCacheTime = now
-  }
-  return Array.isArray(_scheduleCache) ? _scheduleCache : []
+  let fresh = []
+  try {
+    fresh = getUpcomingSchedule(player)
+  } catch (_) { fresh = [] }
+  // Boş sonucu da önbelleğe yaz; bundan sonrası hep ertelenmiş yoldan gider.
+  _scheduleCache = (fresh && fresh.length > 0) ? _mergeEarlyFromCache(fresh) : []
+  return _scheduleCache
 }
 // Yenileme sonrası VP boş dönerse önceki listeyi kaybetmemek için _scheduleCache silinmez; sadece key/süre sıfırlanır
 function invalidateScheduleCache() {
