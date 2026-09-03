@@ -1,5 +1,13 @@
-# Tek workflow: Sürüm günceller, build alır, tag+release oluşturur, EXE'yi hem GitHub Release'e hem R2'ye yükler.
-# Kullanım: Actions → Release: Create and Publish → Run workflow → version (örn. 1.1.3) gir → Run workflow
+# Tek yayin yolu: surumu yukseltir, derler, tag + GitHub Release olusturur ve
+# guncelleme dosyalarini Release'e yukler. Uygulamalar guncellemeyi buradan alir
+# (main.js -> setFeedURL provider: github).
+#
+# Kullanim: Actions -> "Release: Create and Publish" -> Run workflow -> version (orn. 1.1.38)
+#
+# Onemli: yayin kaynagi TEK olmali. electron-builder'in kendi publish mekanizmasi
+# --publish never ile kapatilir; dosyalari yalnizca asagidaki "gh release create"
+# adimi yukler. Aksi halde ayni dosyalar iki kez yuklenir ve exe ile latest.yml
+# icindeki sha512 birbirini tutmayabilir — bu da tum musterilerde guncellemeyi kirar.
 
 name: "Release: Create and Publish"
 
@@ -7,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Sürüm numarası (örn. 1.1.3)"
+        description: "Sürüm numarası (örn. 1.1.38)"
         required: true
         type: string
 
@@ -23,8 +31,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -32,14 +38,28 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      - name: Sürüm biçimini ve tag çakışmasını denetle
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Sürüm x.y.z biçiminde olmalı. Girilen: $VERSION"
+            exit 1
+          fi
+          git fetch --tags origin
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::v$VERSION etiketi zaten var."
+            exit 1
+          fi
+
       - name: Configure npm for GitHub Packages
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          # GITHUB_TOKEN yedegi kaldirildi: bu repo aimusiccompany altinda, paket ise
+          # GITHUB_TOKEN yedegi yok: bu repo aimusiccompany altinda, paket ise
           # ai-music-corp org'una ait. Repo kapsamli GITHUB_TOKEN baska bir org'un
-          # paketlerine hicbir zaman erisemez; yedek olarak kullanildiginda net bir
-          # "token yok" hatasi yerine kafa karistirici bir 401 uretiyordu.
+          # paketlerine erisemez; yedek olarak kullanildiginda net bir "token yok"
+          # hatasi yerine kafa karistirici bir 401 uretiyordu.
           if [ -z "$NPM_TOKEN" ]; then
             echo "::error::NPM_TOKEN secret'i tanimli degil."
             echo "::error::@ai-music-corp paketleri icin read:packages kapsamli bir GitHub PAT gerekiyor."
@@ -48,7 +68,7 @@ jobs:
           echo "@ai-music-corp:registry=https://npm.pkg.github.com/" >> .npmrc
           echo "//npm.pkg.github.com/:_authToken=$NPM_TOKEN" >> .npmrc
 
-      - name: Set version in package.json
+      - name: package.json sürümünü yaz
         env:
           VERSION: ${{ github.event.inputs.version }}
         run: |
@@ -56,75 +76,99 @@ jobs:
             const fs = require('fs');
             const p = require('./package.json');
             p.version = process.env.VERSION;
-            fs.writeFileSync('package.json', JSON.stringify(p, null, 2));
+            fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
           "
 
-      - name: Install dependencies
+      - name: Bağımlılıkları kur
         run: npm ci
 
-      - name: Build app bundle
+      - name: Frontend bundle üret
         run: npm run build
 
-      - name: Build Electron (dist)
-        run: npm run dist
+      - name: Kurulum paketini derle (32+64 bit tek installer)
+        # --publish never: yayin tek kaynaktan, asagidaki adimdan yapilir.
+        run: npm run dist -- --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      # Sadece kurulum EXE + latest.yml (R2 ve Release için; unpacked, blockmap, builder-debug atılmaz)
-      - name: Prepare release assets (Setup exe + latest.yml only)
+      - name: Yayınlanacak dosyaları hazırla
+        env:
+          VERSION: ${{ github.event.inputs.version }}
         run: |
           mkdir -p dist-upload
-          cp dist/*Setup*.exe dist-upload/ 2>/dev/null || true
-          cp dist/latest.yml dist-upload/ 2>/dev/null || true
+          EXE="dist/AI.Music.Player.Setup.$VERSION.exe"
+          if [ ! -f "$EXE" ]; then
+            echo "::error::Kurulum dosyasi bulunamadi: $EXE"
+            ls -la dist/ || true
+            exit 1
+          fi
+          cp "$EXE" dist-upload/
+          # blockmap: fark bazli (differential) indirme icin gerekli. Yuklenmezse
+          # electron-updater her guncellemede 130+ MB'lik tam indirmeye duser.
+          if [ -f "$EXE.blockmap" ]; then
+            cp "$EXE.blockmap" dist-upload/
+          else
+            echo "::warning::blockmap bulunamadi; fark bazli indirme devre disi kalir."
+          fi
+          if [ ! -f dist/latest.yml ]; then
+            echo "::error::latest.yml uretilmemis; guncelleme feed'i olusturulamaz."
+            exit 1
+          fi
+          cp dist/latest.yml dist-upload/
           ls -la dist-upload/
 
-      - name: Upload to Cloudflare R2
-        uses: ryand56/r2-upload-action@v1.4
-        with:
-          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
-          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: dist-upload
-          destination-dir: updates
-          output-file-url: true
+      - name: latest.yml ile exe tutarlılığını doğrula
+        run: |
+          # latest.yml icindeki sha512, yuklenen exe ile ayni olmali; yoksa
+          # electron-updater indirmeyi reddeder ve guncelleme sessizce kirilir.
+          node -e "
+            const fs = require('fs'), crypto = require('crypto'), path = require('path');
+            const yml = fs.readFileSync('dist-upload/latest.yml', 'utf8');
+            const m = yml.match(/^path:\s*(.+)\s*$/m);
+            if (!m) { console.error('latest.yml icinde path yok'); process.exit(1); }
+            const file = path.join('dist-upload', m[1].trim());
+            const want = (yml.match(/^sha512:\s*(.+)\s*$/m) || [])[1].trim();
+            const got = crypto.createHash('sha512').update(fs.readFileSync(file)).digest('base64');
+            if (want !== got) { console.error('sha512 uyusmuyor!'); process.exit(1); }
+            console.log('sha512 dogrulandi: ' + path.basename(file));
+          "
 
-      - name: Commit version bump and push
+      - name: Sürüm değişikliğini commit'le ve push et
+        env:
+          VERSION: ${{ github.event.inputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add package.json
-          git diff --staged --quiet || git commit -m "chore: release v${{ github.event.inputs.version }}"
-          git push
+          git diff --staged --quiet || git commit -m "chore: release v$VERSION"
+          git push origin HEAD:main
 
-      - name: Create tag and push
-        run: |
-          TAG="v${{ github.event.inputs.version }}"
-          git tag "$TAG"
-          git push origin "$TAG"
-
-      - name: Create GitHub Release and upload EXE/assets
+      - name: Tag oluştur ve push et
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.event.inputs.version }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
-          TAG="v$VERSION"
-          BODY="Release v$VERSION - AI Music Player"
-          curl -sS -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/${{ github.repository }}/releases" \
-            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"body\":\"$BODY\"}" > release.json
-          UPLOAD_URL=$(node -e "const j=JSON.parse(require('fs').readFileSync('release.json','utf8')); console.log((j.upload_url||'').replace(/\{.*/,''))")
-          if [ -z "$UPLOAD_URL" ]; then echo "No upload_url in response"; cat release.json; exit 1; fi
-          for f in dist-upload/*Setup*.exe dist-upload/latest.yml; do
-            [ -f "$f" ] || continue
-            name=$(basename "$f")
-            echo "Uploading $name to Release..."
-            curl -sS -X POST \
-              -H "Authorization: token $GITHUB_TOKEN" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary "@$f" \
-              "${UPLOAD_URL}?name=$(echo -n "$name" | sed 's/ /%20/g')"
-          done
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+
+      - name: GitHub Release oluştur ve dosyaları yükle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          gh release create "v$VERSION" dist-upload/* \
+            --title "v$VERSION" \
+            --notes "AI Music Player v$VERSION (Universal 32+64 bit Installer)"
+
+      - name: Güncelleme feed'ini doğrula
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          # Musterilerin gordugu adres: kimlik dogrulamasiz erisilebilmeli.
+          sleep 5
+          FEED=$(curl -sSL "https://github.com/${{ github.repository }}/releases/latest/download/latest.yml")
+          echo "$FEED"
+          if ! echo "$FEED" | grep -q "version: $VERSION"; then
+            echo "::error::Feed henuz $VERSION gostermiyor."
+            exit 1
+          fi
+          echo "Guncelleme feed'i $VERSION olarak yayinda."
