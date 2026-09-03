@@ -140,6 +140,12 @@ copy /y "%SRC_EXE%" "%UPLOAD_DIR%\%EXE_NAME%" >nul 2>&1
 if exist "%SRC_EXE%.blockmap" copy /y "%SRC_EXE%.blockmap" "%UPLOAD_DIR%\%EXE_NAME%.blockmap" >nul 2>&1
 copy /y "dist\latest.yml" "%UPLOAD_DIR%\latest.yml" >nul 2>&1
 
+rem Web sitesi icin surumsuz sabit isimli kopya. Bu sayede
+rem .../releases/latest/download/AI.Music.Player.Setup.exe baglantisi
+rem her surumde ayni kalir ve site guncellenmek zorunda kalmaz.
+rem Not: latest.yml'ye dahil DEGILDIR; guncelleyici surumlu dosyayi kullanir.
+copy /y "%SRC_EXE%" "%UPLOAD_DIR%\AI.Music.Player.Setup.exe" >nul 2>&1
+
 echo.
 echo [5/6] Versiyon degisiklikleri Git'e gonderiliyor...
 set "DIRTY="

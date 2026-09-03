@@ -115,6 +115,11 @@ jobs:
             exit 1
           fi
           cp dist/latest.yml dist-upload/
+          # Web sitesi icin surumsuz sabit isimli kopya: bu sayede
+          # .../releases/latest/download/AI.Music.Player.Setup.exe baglantisi
+          # her surumde ayni kalir, site guncellenmek zorunda kalmaz.
+          # latest.yml'ye dahil DEGILDIR; guncelleyici surumlu dosyayi kullanir.
+          cp "$EXE" dist-upload/AI.Music.Player.Setup.exe
           ls -la dist-upload/
 
       - name: latest.yml ile exe tutarlılığını doğrula
