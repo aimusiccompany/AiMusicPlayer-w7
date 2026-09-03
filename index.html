@@ -52,10 +52,6 @@
           <span class="nav-icon gear" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></span>
           <span class="nav-label">Ayarlar</span>
         </a>
-        <a href="#" class="nav-link" data-view="logout">
-          <span class="nav-icon exit" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg></span>
-          <span class="nav-label">Çıkış Yap</span>
-        </a>
       </nav>
     </aside>
 
@@ -212,11 +208,29 @@
         <label>Yayın akışı</label>
         <button type="button" class="settings-refresh-btn" id="settings-refresh-playlist">Yayın akışını yenile</button>
       </div>
+      <div class="settings-row">
+        <label>Oturum</label>
+        <button type="button" class="settings-logout-btn" id="settings-logout">
+          <span class="settings-logout-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg></span>
+          Çıkış Yap
+        </button>
+      </div>
       <div class="settings-row settings-version">
         <span class="settings-version-label">Sürüm</span>
         <span class="settings-version-value" id="settings-version">—</span>
       </div>
       <button type="button" class="settings-close" id="settings-close">Kapat</button>
+    </div>
+  </div>
+
+  <div class="settings-overlay confirm-overlay" id="logout-overlay" aria-hidden="true">
+    <div class="settings-modal confirm-modal" role="alertdialog" aria-labelledby="logout-title" aria-describedby="logout-desc">
+      <h2 class="settings-title" id="logout-title">Çıkış yapmak istediğinize emin misiniz?</h2>
+      <p class="confirm-text" id="logout-desc">Oturumunuz kapatılacak ve giriş ekranına döneceksiniz. Yayın akışı duracaktır.</p>
+      <div class="confirm-actions">
+        <button type="button" class="confirm-btn confirm-btn-danger" id="logout-confirm">Çıkış Yap</button>
+        <button type="button" class="confirm-btn confirm-btn-ghost" id="logout-cancel">Vazgeç</button>
+      </div>
     </div>
   </div>
 

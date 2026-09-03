@@ -40,6 +40,13 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* html bir flex kapsayıcı olduğu için body de flex öğesi; genişlik verilmezse
+   içeriğine göre daralıyor ve .login-wrap üzerindeki max-width hiç devreye
+   girmiyordu (kart ~376px'te kalıyordu). */
+body {
+  width: 100%;
+}
+
 :focus-visible {
   outline: 2px solid var(--accent-blue);
   outline-offset: 2px;
@@ -47,7 +54,7 @@ html, body {
 
 .login-wrap {
   width: 100%;
-  max-width: 420px;
+  max-width: 500px;
   padding: 28px;
 }
 
@@ -124,7 +131,7 @@ html, body {
 .login-form input[type="password"],
 .login-form input[type="text"] {
   width: 100%;
-  padding: 12px 14px;
+  padding: 13px 16px;
   font-size: 15px;
   font-family: inherit;
   background: var(--input-bg);
@@ -148,21 +155,51 @@ html, body {
   background: rgba(255, 255, 255, 0.07);
 }
 
+/* Göster/Gizle düğmesi mutlak konumlandırılıp inputa sağ dolgu verildiğinde,
+   uzun parolalarda kaydırılan metin dolgunun altına girip düğmenin arkasında
+   kalıyordu (Chromium inputlarda taşan metni dolguya taşırır). Çözüm: çerçeveyi
+   sarmalayıcıya taşımak ve düğmeyi gerçek bir flex öğesi yapmak — böylece
+   inputun kutusu fiziksel olarak düğmeden önce biter. */
 .password-wrap {
-  position: relative;
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  transition: border-color 0.16s linear, background-color 0.16s linear;
 }
 
-.password-wrap input {
-  padding-right: 84px;
+.password-wrap:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.password-wrap:focus-within {
+  border-color: var(--accent-blue);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.password-wrap input[type="password"],
+.password-wrap input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  background: transparent;
+  border: none;
+  border-radius: 11px 0 0 11px;
+  padding-right: 6px;
+}
+
+/* Çerçeve/zemin artık sarmalayıcıda; input kendi durumunu boyamasın */
+.password-wrap input:hover,
+.password-wrap input:focus {
+  border-color: transparent;
+  background: transparent;
 }
 
 .btn-toggle-password {
-  position: absolute;
-  right: 7px;
-  top: 50%;
-  transform: translateY(-50%);
+  flex-shrink: 0;
+  align-self: center;
+  margin-right: 6px;
   background: none;
   border: none;
   color: var(--accent-blue-strong);

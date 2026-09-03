@@ -2014,6 +2014,95 @@ button, input, select {
   color: var(--text-primary);
 }
 
+/* Ayarlar içindeki çıkış düğmesi */
+.settings-logout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s linear, border-color 0.15s linear;
+}
+
+.settings-logout-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: var(--danger);
+}
+
+.settings-logout-icon svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+/* ========== Onay modalı (çıkış) ========== */
+.confirm-overlay {
+  z-index: 1200;
+}
+
+.confirm-modal {
+  max-width: 400px;
+  text-align: center;
+}
+
+.confirm-modal .settings-title {
+  font-size: 16.5px;
+  line-height: 1.45;
+  margin-bottom: 10px;
+}
+
+.confirm-text {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin-bottom: 22px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.confirm-btn {
+  flex: 1;
+  padding: 11px 16px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s linear, color 0.15s linear;
+}
+
+.confirm-btn-danger {
+  background: var(--danger);
+  color: #fff;
+  border: 1px solid var(--danger);
+}
+
+.confirm-btn-danger:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.confirm-btn-ghost {
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-strong);
+}
+
+.confirm-btn-ghost:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 /* ========== Çalma listesi yükleniyor ========== */
 /* Overlay değil, akışta yer alır; tıklamayı engellemez */
 .playlist-loading {

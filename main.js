@@ -1,10 +1,14 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Tray, Menu } = require('electron');
 const path = require('path');
 const { serve } = require('./server.js');
 
 let mainWindow = null;
 let localServer = null;
 let updateCheckTimer = null;
+let tray = null;
+// Pencere çarpıya basılınca kapanmaz, tepsiye iner. Gerçek çıkışta bu bayrak açılır.
+let isQuitting = false;
+let trayBalloonShown = false;
 const args = process.argv.slice(1);
 const zoneArg = args.find((arg) => arg.startsWith('--zone='));
 const zoneNameRaw = zoneArg ? zoneArg.split('=')[1] : 'default';
@@ -46,12 +50,8 @@ const APP_PATH = __dirname;
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
-  });
+  // Tepsideyken kısayola tekrar tıklanırsa pencere geri gelsin.
+  app.on('second-instance', showWindow);
   bootstrap();
 }
 
@@ -73,6 +73,66 @@ async function startLocalServer() {
     }
   }
   throw lastError || new Error('Uygun port bulunamadı.');
+}
+
+// ——— Açılışta otomatik başlatma ———
+// Kapatma seçeneği yok: mağaza cihazı her açıldığında yayın kendiliğinden başlamalı.
+// Her açılışta yeniden yazılır; kayıt defteri girdisi silinse bile geri gelir.
+
+// Kurulum başka bir zona/porta göre yapıldıysa otomatik başlatma da aynı argümanlarla olmalı.
+function launchArgs() {
+  const out = [];
+  if (zoneName !== 'default') out.push('--zone=' + zoneName);
+  if (isValidPort(parsedPort)) out.push('--port=' + parsedPort);
+  if (lowRamMode) out.push('--low-ram');
+  return out;
+}
+
+function setupAutoLaunch() {
+  if (!app.isPackaged) return; // geliştirmede electron.exe'yi başlangıca eklemeyelim
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: true,
+      path: process.execPath,
+      args: launchArgs()
+    });
+  } catch (e) {
+    console.log('[AutoLaunch ERROR]: ' + (e && e.message ? e.message : String(e)));
+  }
+}
+
+// ——— Sistem tepsisi ———
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible()) mainWindow.show();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+}
+
+function createTray() {
+  if (tray) return;
+  try {
+    tray = new Tray(path.join(__dirname, 'assets', 'ai-music-logo.ico'));
+  } catch (e) {
+    console.log('[Tray ERROR]: ' + (e && e.message ? e.message : String(e)));
+    return;
+  }
+  const menu = Menu.buildFromTemplate([
+    { label: 'AI Music Player\'ı Göster', click: showWindow },
+    { type: 'separator' },
+    {
+      label: 'Çıkış',
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+  tray.setToolTip('AI Music Player - ' + zoneName);
+  tray.setContextMenu(menu);
+  // Sol tık pencereyi geri getirir; kapatma yalnızca sağ tık menüsünden.
+  tray.on('click', showWindow);
+  tray.on('double-click', showWindow);
 }
 
 function sendToRenderer(channel, payload) {
@@ -188,6 +248,8 @@ ipcMain.handle('open-external', (_, url) => {
 ipcMain.on('install-update-now', () => {
   try {
     const { autoUpdater } = require('electron-updater');
+    // Tepsiye inme davranışı kurulumu engellemesin.
+    isQuitting = true;
     // Sunucu kapanmazsa quitAndInstall sonrası port dolu kalabiliyor.
     if (localServer) { try { localServer.close(); } catch (_) {} localServer = null; }
     autoUpdater.quitAndInstall(false, true);
@@ -221,6 +283,22 @@ function createWindow() {
     }
   });
 
+  // Çarpıya basmak uygulamayı kapatmaz: yayın kesilmesin diye tepside çalışmaya devam eder.
+  mainWindow.on('close', (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    mainWindow.hide();
+    if (!trayBalloonShown && tray) {
+      trayBalloonShown = true;
+      try {
+        tray.displayBalloon({
+          title: 'AI Music Player çalışmaya devam ediyor',
+          content: 'Yayın arka planda sürüyor. Tamamen kapatmak için tepsi simgesine sağ tıklayıp Çıkış\'ı seçin.'
+        });
+      } catch (_) {}
+    }
+  });
+
   mainWindow.on('closed', () => { mainWindow = null; });
   mainWindow.loadURL('http://127.0.0.1:' + localPort + '/login.html');
 }
@@ -230,6 +308,8 @@ function bootstrap() {
     return startLocalServer().then((server) => {
       localServer = server;
       createWindow();
+      createTray();
+      setupAutoLaunch();
       setupAutoUpdater();
     });
   }).catch((err) => {
@@ -243,8 +323,16 @@ function bootstrap() {
   });
 }
 
+app.on('before-quit', () => { isQuitting = true; });
+
+// Pencere gizlendiği için normalde tetiklenmez; yine de tepsideyken uygulamayı kapatma.
 app.on('window-all-closed', () => {
+  if (!isQuitting) return;
+  if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('quit', () => {
   if (updateCheckTimer) { clearInterval(updateCheckTimer); updateCheckTimer = null; }
   if (localServer) { try { localServer.close(); } catch (_) {} localServer = null; }
-  if (process.platform !== 'darwin') app.quit();
+  if (tray) { try { tray.destroy(); } catch (_) {} tray = null; }
 });

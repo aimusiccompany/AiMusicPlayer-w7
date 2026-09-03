@@ -75,8 +75,13 @@
   }
 
   // CSP uyumu: inline event handler yok; resim hatalarında fallback JS ile
+  // Not: her liste çiziminde çağrılıyor. İşaretleme olmadan sayfadaki sabit
+  // görsellere (logo, kapak alanları) her seferinde bir dinleyici daha ekleniyor
+  // ve saatler içinde birikiyordu.
   function setupImageFallbacks() {
     document.querySelectorAll('img[data-fallback]').forEach(function (img) {
+      if (img._fallbackBound) return;
+      img._fallbackBound = true;
       img.addEventListener('error', function () {
         var mode = img.getAttribute('data-fallback');
         if (mode === 'next') {
@@ -596,71 +601,110 @@
         '</li>');
     }
     el.innerHTML = parts.join('');
-    el.querySelectorAll('.track-item').forEach(function (li) {
-      li.addEventListener('click', function (e) {
-        if (e.target.closest('.track-actions')) return;
-        var idx = li.dataset.fullIndex != null ? parseInt(li.dataset.fullIndex, 10) : parseInt(li.dataset.index, 10);
-        if (!isNaN(idx) && idx >= 0 && window.onPlaylistTrackSelect) window.onPlaylistTrackSelect(idx);
-      });
-    });
-    el.querySelectorAll('.btn-like').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        var li = this.closest('li');
-        var fullIdx = li && li.dataset.fullIndex != null ? parseInt(li.dataset.fullIndex, 10) : -1;
-        if (fullIdx >= 0 && window.playerState && window.playerState.playlist[fullIdx]) {
-          var t = window.playerState.playlist[fullIdx];
-          if (t.recordType === 'song') {
-            var id = String(t.id);
-            if (likedSet.has(id)) likedSet.delete(id); else likedSet.add(id);
-            saveLikedSet();
-            this.classList.toggle('liked', likedSet.has(id));
-            var dis = li.querySelector('.btn-dislike');
-            if (dis) dis.classList.remove('disliked');
-            var centerAfterLike = getCenterList(window.playerState);
-            updateContentHeader(currentView, window.playerState, centerAfterLike.list.length);
-            if (currentView === 'favorites') {
-              renderPlaylist(centerAfterLike.list, centerAfterLike.currentIndexInList);
-            }
-          }
-        } else {
-          this.classList.toggle('liked');
-          if (li) { var d = li.querySelector('.btn-dislike'); if (d) d.classList.remove('disliked'); }
-        }
-      });
-    });
-    el.querySelectorAll('.btn-dislike').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        this.classList.toggle('disliked');
-        var li = this.closest('li');
-        if (!li) return;
-        var likeBtn = li.querySelector('.btn-like');
-        if (likeBtn) likeBtn.classList.remove('liked');
-        // Kalp işaretini kaldırmak yetmiyordu: parça likedSet'te kalıyor ve
-        // "Beğenilen Şarkılar" listesinde görünmeye devam ediyordu.
-        var fullIdx = li.dataset.fullIndex != null ? parseInt(li.dataset.fullIndex, 10) : -1;
-        var t = fullIdx >= 0 && window.playerState ? window.playerState.playlist[fullIdx] : null;
-        if (!t || t.recordType !== 'song') return;
-        if (!likedSet.delete(String(t.id))) return;
-        saveLikedSet();
-        var centerAfterDislike = getCenterList(window.playerState);
-        updateContentHeader(currentView, window.playerState, centerAfterDislike.list.length);
-        if (currentView === 'favorites') {
-          renderPlaylist(centerAfterDislike.list, centerAfterDislike.currentIndexInList);
-        }
-      });
-    });
+    // Dinleyiciler listeye bir kez bağlanır (olay delegasyonu). Önceden her
+    // yeniden çizimde satır başına üç dinleyici ekleniyordu; günlük akış birkaç
+    // yüz satır olduğu için bu her güncellemede binlerce bağlama demekti.
+    bindPlaylistDelegation(el);
+
     // Çalan parça değişmediyse kaydırma; aksi halde kullanıcı listede gezerken
     // her yeniden çizimde görünüm başa atlıyordu.
     var playingLi = currentIndex >= 0 ? el.querySelector('.track-item.playing') : null;
     var scrollKey = currentView + '|' + currentIndex;
-    if (playingLi && typeof playingLi.scrollIntoView === 'function' && scrollKey !== window._lastScrollKey) {
+    if (playingLi && scrollKey !== window._lastScrollKey) {
       window._lastScrollKey = scrollKey;
-      playingLi.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      scrollPlayingIntoView(playingLi);
     }
     // CSP uyumu: dinamik eklenen img'lere fallback (inline onerror güvenlik nedeniyle çalışmayabilir)
     setupImageFallbacks();
+  }
+
+  /**
+   * Çalan satırı yapışkan başlığın hemen altına hizalar.
+   *
+   * Önceden scrollIntoView({block:'start'}) kullanılıyordu; bu, satırın üst
+   * kenarını kaydırma kabının üst kenarıyla hizalar — yani tam da yapışkan
+   * "SIRA / Başlık / Zaman" başlığının bulunduğu yere. Sonuç: çalan parça
+   * başlığın arkasında kalıyor ve listede ilk görünen satır hep bir sonraki
+   * parça oluyordu, yani liste saatin bir tık ilerisinde duruyordu.
+   *
+   * Ayrıca satırlarda content-visibility:auto var; ekran dışı satırların
+   * yüksekliği tahmin ediliyor. Yumuşak kaydırma sırasında satırlar gerçekten
+   * çizildikçe tahminler düzeliyor ve hedef kayıyordu. Bu yüzden kaydırma anlık
+   * yapılır ve satırlar yerleştikten sonra bir kez daha düzeltilir.
+   */
+  function scrollPlayingIntoView(li) {
+    var wrap = document.querySelector('.playlist-list-wrap');
+    if (!wrap || !li) return;
+    var toolbar = wrap.querySelector('.playlist-toolbar');
+    var headerH = toolbar ? toolbar.offsetHeight : 0;
+    var settle = function () {
+      if (!li.isConnected) return;
+      // offsetParent = .playlist-list-wrap (position: relative), yani offsetTop
+      // doğrudan kaydırma içeriğine göredir.
+      var target = li.offsetTop - headerH - 8;
+      if (target < 0) target = 0;
+      var max = wrap.scrollHeight - wrap.clientHeight;
+      if (target > max) target = max;
+      if (Math.abs(wrap.scrollTop - target) > 1) wrap.scrollTop = target;
+    };
+    settle();
+    requestAnimationFrame(function () { requestAnimationFrame(settle); });
+  }
+
+  /** Liste tıklamaları: tek dinleyici, hedefe göre dallanır. */
+  function bindPlaylistDelegation(el) {
+    if (el._delegationBound) return;
+    el._delegationBound = true;
+    el.addEventListener('click', function (e) {
+      var li = e.target.closest ? e.target.closest('.track-item') : null;
+      if (!li) return;
+      var fullIdx = li.dataset.fullIndex != null ? parseInt(li.dataset.fullIndex, 10) : -1;
+      var track = (fullIdx >= 0 && window.playerState) ? window.playerState.playlist[fullIdx] : null;
+      var likeBtn = e.target.closest('.btn-like');
+      var dislikeBtn = e.target.closest('.btn-dislike');
+
+      if (likeBtn) {
+        e.stopPropagation();
+        if (!track || track.recordType !== 'song') {
+          likeBtn.classList.toggle('liked');
+          return;
+        }
+        var id = String(track.id);
+        if (likedSet.has(id)) likedSet.delete(id); else likedSet.add(id);
+        saveLikedSet();
+        likeBtn.classList.toggle('liked', likedSet.has(id));
+        var dis = li.querySelector('.btn-dislike');
+        if (dis) dis.classList.remove('disliked');
+        refreshAfterLikeChange();
+        return;
+      }
+
+      if (dislikeBtn) {
+        e.stopPropagation();
+        dislikeBtn.classList.toggle('disliked');
+        var lb = li.querySelector('.btn-like');
+        if (lb) lb.classList.remove('liked');
+        // Kalp işaretini kaldırmak yetmiyor: parça likedSet'te kalırsa
+        // "Beğenilen Şarkılar" listesinde görünmeye devam ediyor.
+        if (!track || track.recordType !== 'song') return;
+        if (!likedSet.delete(String(track.id))) return;
+        saveLikedSet();
+        refreshAfterLikeChange();
+        return;
+      }
+
+      if (e.target.closest('.track-actions')) return;
+      var idx = fullIdx >= 0 ? fullIdx : parseInt(li.dataset.index, 10);
+      if (!isNaN(idx) && idx >= 0 && window.onPlaylistTrackSelect) window.onPlaylistTrackSelect(idx);
+    });
+  }
+
+  function refreshAfterLikeChange() {
+    var center = getCenterList(window.playerState);
+    updateContentHeader(currentView, window.playerState, center.list.length);
+    if (currentView === 'favorites') {
+      renderPlaylist(center.list, center.currentIndexInList);
+    }
   }
 
   // Anonslar cihaz saatine göre "yayınlandı / yayında / sırada" olarak işaretlenir;
@@ -820,12 +864,21 @@
     var now = new Date();
     var timeEl = document.getElementById('sidebar-time');
     if (timeEl) timeEl.textContent = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-    var dateEl = document.getElementById('sidebar-date');
-    if (dateEl) dateEl.textContent = now.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
     var h = now.getHours();
+    // Tarih ve selamlama saniyede bir değişmiyor; toLocaleDateString saniyede bir
+    // çağrılmasın diye yalnızca gün/saat dilimi değiştiğinde yazılır.
+    var dayKey = now.getFullYear() + '-' + now.getMonth() + '-' + now.getDate();
+    if (dayKey !== window._lastClockDayKey) {
+      window._lastClockDayKey = dayKey;
+      var dateEl = document.getElementById('sidebar-date');
+      if (dateEl) dateEl.textContent = now.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+    }
     var greeting = (h >= 0 && h < 6) ? 'İyi geceler' : (h >= 18) ? 'İyi Akşamlar' : 'İyi Günler';
-    var gEl = document.getElementById('now-playing-greeting');
-    if (gEl) gEl.textContent = greeting;
+    if (greeting !== window._lastGreeting) {
+      window._lastGreeting = greeting;
+      var gEl = document.getElementById('now-playing-greeting');
+      if (gEl) gEl.textContent = greeting;
+    }
     // Anons durumları (yayınlandı/yayında/sırada) dakikada bir tazelenir.
     var minuteKey = h * 60 + now.getMinutes();
     if (minuteKey !== window._lastAdsMinute) {
@@ -963,9 +1016,14 @@
       window.open(contactWhatsAppUrl, '_blank');
     }
   });
-  // Esc ile açık modalları kapat
+  // Esc ile açık modalları kapat. Onay modalı açıksa Esc = "Vazgeç" demektir,
+  // bu yüzden yalnızca o kapanır; arkasındaki modallara dokunulmaz.
   document.addEventListener('keydown', function (e) {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' && e.keyCode !== 27) return;
+    if (logoutOverlay && logoutOverlay.getAttribute('aria-hidden') === 'false') {
+      logoutOverlay.setAttribute('aria-hidden', 'true');
+      return;
+    }
     [settingsOverlay, contactOverlay].forEach(function (ov) {
       if (ov && ov.getAttribute('aria-hidden') === 'false') ov.setAttribute('aria-hidden', 'true');
     });
@@ -979,17 +1037,53 @@
     }
   });
 
-  // Çıkış Yap — login'e ?logout=1 ile git ki login sayfası oturum varken tekrar uygulamaya atmasın
-  document.querySelector('.nav-link[data-view="logout"]')?.addEventListener('click', function (e) {
-    e.preventDefault();
-    if (window.electronAPI && window.electronAPI.navigateToLogin) {
-      window.electronAPI.navigateToLogin(true);
-    } else {
-      window.location.href = 'login.html?logout=1';
-    }
+  // ——— Çıkış Yap (Ayarlar içinde, onaylı) ———
+  var logoutOverlay = document.getElementById('logout-overlay');
+
+  function openLogoutConfirm() {
+    if (settingsOverlay) settingsOverlay.setAttribute('aria-hidden', 'true');
+    if (!logoutOverlay) { doLogout(); return; }
+    logoutOverlay.setAttribute('aria-hidden', 'false');
+    var cancelBtn = document.getElementById('logout-cancel');
+    // Yanlışlıkla onaylanmasın diye odak "Vazgeç" üzerinde başlar.
+    if (cancelBtn) cancelBtn.focus();
+  }
+
+  function closeLogoutConfirm() {
+    if (logoutOverlay) logoutOverlay.setAttribute('aria-hidden', 'true');
+  }
+
+  // Oturumu kapat, sonra login'e ?logout=1 ile git ki login sayfası
+  // oturum varmış gibi tekrar uygulamaya atlamasın.
+  function doLogout() {
+    var go = function () {
+      if (window.electronAPI && window.electronAPI.navigateToLogin) {
+        window.electronAPI.navigateToLogin(true);
+      } else {
+        window.location.href = 'login.html?logout=1';
+      }
+    };
+    // Sayfa değişimi signOut'u yarıda kesmesin: önce çıkış, sonra yönlendirme.
     if (window.supabaseClient && window.supabaseClient.auth) {
-      window.supabaseClient.auth.signOut().catch(function () {});
+      window.supabaseClient.auth.signOut().then(go).catch(go);
+    } else {
+      go();
     }
+  }
+
+  document.getElementById('settings-logout')?.addEventListener('click', function (e) {
+    e.preventDefault();
+    openLogoutConfirm();
+  });
+  document.getElementById('logout-confirm')?.addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Çıkış yapılıyor…';
+    doLogout();
+  });
+  document.getElementById('logout-cancel')?.addEventListener('click', closeLogoutConfirm);
+  logoutOverlay?.addEventListener('click', function (e) {
+    if (e.target === logoutOverlay) closeLogoutConfirm();
   });
 
   // Sıradaki parçayı önceden yükle → parça geçişinde canplay gecikmesi azalır
