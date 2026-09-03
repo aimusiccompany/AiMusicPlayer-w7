@@ -1,0 +1,41 @@
+# GECICI: NPM_TOKEN secret'inin GitHub Packages'a erisimini dogrular.
+# Hicbir sey derlemez, yayinlamaz, hicbir yere yuklemez. Dogrulama bitince silinir.
+name: "Verify: GitHub Packages auth"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Configure npm for GitHub Packages
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret'i tanimli degil."
+            exit 1
+          fi
+          echo "@ai-music-corp:registry=https://npm.pkg.github.com/" >> .npmrc
+          echo "//npm.pkg.github.com/:_authToken=$NPM_TOKEN" >> .npmrc
+
+      - name: Paket meta verisi okunabiliyor mu
+        run: npm view @ai-music-corp/virtual-player version
+
+      - name: Tarball indirilebiliyor mu (CI'da 401 veren uc nokta)
+        run: npm pack @ai-music-corp/virtual-player@102.18.3 --pack-destination /tmp
+
+      - name: npm ci (script'ler olmadan, hizli)
+        run: npm ci --ignore-scripts
+
+      - name: Kurulan surumu dogrula
+        run: node -p "require('./node_modules/@ai-music-corp/virtual-player/package.json').version"
