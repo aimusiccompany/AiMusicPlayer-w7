@@ -373,16 +373,25 @@ function buildPlayerForDay(userId, client, persistStorage, startOfDay, carry, on
   const unsubs = []
   const timers = []
 
+  // DİKKAT: kütüphanede `userVolume` / `userMuted` diye bir alan YOK (grep ile
+  // doğrulandı). Ses tek yerden yönetiliyor: playback.desiredVolume ve ondan
+  // türeyen system.volume. Gün devrinde taze state kurulunca ikisi de
+  // varsayılan 1'e dönüyor ve gece 00:00'da ses %100'e fırlıyordu.
+  const carriedVolume = carry && carry.volume != null ? carry.volume : null
   const state = new VirtualPlayerState({
     system: {
       mode: 'cached',
-      // Gün devrinde ses/sessiz durumu korunsun; mağazada ses seviyesi sıfırlanmasın.
-      userMuted: carry && carry.userMuted != null ? carry.userMuted : false,
-      userVolume: carry && carry.userVolume != null ? carry.userVolume : 1
+      volume: carriedVolume != null ? carriedVolume : 1
     }
   })
 
   const player = new VirtualPlayer({ userId, startOfDay, state, maxDeltaTime: 10000 })
+  // desiredVolume de taşınmalı: playback.update() her turda
+  // system.volume !== desiredVolume ise system.volume'u desiredVolume'a çeker.
+  // Yalnızca system.volume yazsaydık ilk tick'te tekrar 1'e dönerdi.
+  if (carriedVolume != null) {
+    try { player.state.controllers.playback.setDesiredVolume(carriedVolume) } catch (_) {}
+  }
   // maxDeltaTime: yerel simülasyon adımı (ağ isteği değil). Ağ: Fetcher 1 dk, presence heartbeat 3 dk.
   // Referans (VirtualPlayerProvider): güne 0'dan başla, sonra startRealtimeSimulation tek sefer getLocalTime() % DAY'e sarar
   player.state.system.unsafeDirectModify({ deltaTime: 0, currentTime: 0 })
@@ -590,15 +599,46 @@ async function initVirtualPlayer(userId) {
   // Yerel gün kontrolü şart: simülasyon yerel gece yarısından birkaç ms önce
   // DAY'e ulaşırsa, tarih hâlâ eski gün olacağı için koşulsuz yeniden kurmak
   // sonsuz döngü yaratırdı.
+  /** Çalmakta olan parçadan geriye kalan süre (ms). Yoksa 0. */
+  function playingRemainingMs() {
+    try {
+      if (typeof document === 'undefined') return 0
+      const a = document.getElementById('app-audio')
+      if (!a || !a.src) return 0
+      const dur = (typeof window !== 'undefined' && window._trackDurationSec != null)
+        ? window._trackDurationSec
+        : (a.duration && !isNaN(a.duration) ? a.duration : 0)
+      if (!dur) return 0
+      const rem = (dur - a.currentTime) * 1000
+      return rem > 0 ? rem : 0
+    } catch (_) {
+      return 0
+    }
+  }
+
   function maybeRollOver() {
     if (rolling) return
     const today = getLocalStartOfDay()
     if (_activeStartOfDay != null && today === _activeStartOfDay) return
+
+    // 00:00'dan önce başlamış parça yarıda kesilmesin: devri parça bitene kadar
+    // ertele. Bu sürede eski oynatıcı gün sonunda durmuş durumda, ses çalmaya
+    // devam ediyor. Üst sınır, bozuk süre bilgisinde sonsuz ertelemeyi önler.
+    const remaining = playingRemainingMs()
+    if (remaining > 1000) {
+      rolling = true
+      setTimeout(() => { rolling = false; maybeRollOver() }, Math.min(remaining + 500, 15 * 60 * 1000))
+      return
+    }
+
     rolling = true
     let carry = null
     try {
       const sys = current && current.player.state.system.snapshot()
-      if (sys) carry = { userVolume: sys.userVolume, userMuted: sys.userMuted }
+      const pb = current && current.player.state.controllers.playback.state.snapshot()
+      // desiredVolume asıl kaynak; yoksa system.volume.
+      const v = (pb && pb.desiredVolume != null) ? pb.desiredVolume : (sys ? sys.volume : null)
+      if (v != null) carry = { volume: v }
     } catch (_) {}
     startDay(today, carry)
       .catch((e) => console.warn('[VP] gün devri:', e))

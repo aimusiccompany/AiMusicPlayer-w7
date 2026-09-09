@@ -1155,6 +1155,17 @@
   // Virtual Player: activeRecord → ses oynat. Her parça (ilk dahil) cihaz saatine göre olması gereken saniyeden başlar; akış kayması olmaz.
   var appAudio = document.getElementById('app-audio');
   var activeRecordLoadId = 0;
+
+  /** Çalmakta olan parçadan geriye kalan süre (sn). Çalmıyorsa 0. */
+  function audioRemainingSec() {
+    if (!appAudio || !appAudio.src) return 0;
+    var dur = window._trackDurationSec != null
+      ? window._trackDurationSec
+      : (appAudio.duration && !isNaN(appAudio.duration) ? appAudio.duration : 0);
+    if (!dur || isNaN(dur)) return 0;
+    var rem = dur - appAudio.currentTime;
+    return rem > 0 ? rem : 0;
+  }
   window._pendingActiveRecord = null;
   window._currentActiveRecordUrl = null;
   function applyActiveRecord(d) {
@@ -1210,7 +1221,16 @@
     window.addEventListener('virtualplayer-activerecord', function (e) {
       try {
         var d = e.detail;
+        var remainingSec = audioRemainingSec();
         if (!d || !d.url) {
+          // Yayın akışı "şu an kayıt yok" diyor. Bu gece yarısı normaldir: cihaz
+          // saati 0'a sarınca dünün akışında eşleşen slot kalmaz. Ama 00:00'dan
+          // önce başlamış parça hâlâ çalıyorsa YARIDA KESİLMEMELİ; bitince dursun.
+          if (remainingSec > 1) {
+            window._pendingActiveRecord = { __stopAfterCurrent: true };
+            clearTimeout(window._pendingActiveRecordTimeout);
+            return;
+          }
           window._pendingActiveRecord = null;
           applyActiveRecord(d);
           return;
@@ -1223,6 +1243,11 @@
         if (isNewTrack && appAudio.src && dur > 0 && cur < dur - 3) {
           window._pendingActiveRecord = d;
           clearTimeout(window._pendingActiveRecordTimeout);
+          // Sabit 5 sn bekleyip yeni kaydı uygulamak, 5 sn'den fazla kalan parçayı
+          // yarıda kesiyordu. Kalan süre kadar bekle; 'ended' zaten daha önce
+          // tetiklenirse bekleyen kayıt oradan uygulanıyor. Üst sınır, süre
+          // bilgisi bozuksa sonsuz beklemeyi önler.
+          var waitMs = Math.min(Math.max(remainingSec * 1000 + 500, 1000), 15 * 60 * 1000);
           window._pendingActiveRecordTimeout = setTimeout(function () {
             if (window._pendingActiveRecord) {
               var pending = window._pendingActiveRecord;
@@ -1230,7 +1255,7 @@
               applyActiveRecord(pending);
               updateUIFromState();
             }
-          }, 5000);
+          }, waitMs);
           return;
         }
         clearTimeout(window._pendingActiveRecordTimeout);

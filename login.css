@@ -58,6 +58,14 @@ body {
   padding: 28px;
 }
 
+/* Oturum kontrolü sürerken kart gizli: oturum açıksa giriş ekranı hiç
+   görünmeden uygulamaya geçilir (önceden anlık olarak yanıp sönüyordu).
+   login.js kontrol bitince is-checking sınıfını kaldırır; takılma ihtimaline
+   karşı orada bir zaman aşımı da var. */
+body.is-checking .login-card {
+  visibility: hidden;
+}
+
 .login-card {
   position: relative;
   background-color: var(--bg-card);

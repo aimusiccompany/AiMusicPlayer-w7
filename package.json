@@ -1,6 +1,6 @@
 {
   "name": "ai-music-player",
-  "version":"1.1.38",
+  "version":"1.1.39",
   "description": "AI Music Player - Electron uygulaması",
   "main": "main.js",
   "author": "AI Music",
@@ -16,7 +16,8 @@
     "setup:vp-auth": "node scripts/setup-npmrc-github.js",
     "dist": "electron-builder --win --ia32 --x64",
     "dist:64": "electron-builder --win --x64",
-    "dist:32": "electron-builder --win --ia32"
+    "dist:32": "electron-builder --win --ia32",
+    "test": "esbuild scripts/test-broadcast.mjs --bundle --platform=node --format=cjs --outfile=.tmp-test.cjs --log-level=error && node .tmp-test.cjs"
   },
   "keywords": [
     "music",

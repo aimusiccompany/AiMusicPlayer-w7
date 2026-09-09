@@ -6,3 +6,4 @@ dist-upload/
 *.log
 .DS_Store
 .tmp-vp.js
+.tmp-*

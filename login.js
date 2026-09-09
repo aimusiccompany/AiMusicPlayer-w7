@@ -70,7 +70,16 @@
     }
   }
 
+  // Giriş formu yalnızca gerçekten gerekiyorsa gösterilir; oturum açıksa hiç
+  // görünmez. Kontrol takılırsa formu yine de aç, kullanıcı kilitlenmesin.
+  var revealTimer = setTimeout(revealForm, 2500);
+  function revealForm() {
+    clearTimeout(revealTimer);
+    document.body.classList.remove('is-checking');
+  }
+
   if (typeof supabase === 'undefined') {
+    revealForm();
     if (loginError) loginError.textContent = 'Uygulama bileşenleri yüklenemedi. Lütfen uygulamayı yeniden başlatın.';
     setLoading(false);
     if (btnLogin) btnLogin.disabled = true;
@@ -130,11 +139,15 @@
   // ?logout=1 ile açıldıysa çıkıştan geliyoruz; oturum olsa bile uygulamaya atlama, önce signOut ile temizle
   var isLogoutFlow = window.location && window.location.search.indexOf('logout=1') !== -1;
   if (isLogoutFlow) {
+    // Çıkıştan geliniyor: form zaten gösterilecek.
+    revealForm();
     client.auth.signOut().catch(function () {});
   } else {
     client.auth.getSession().then(function (result) {
       var session = result.data && result.data.session;
+      // Oturum varsa formu hiç gösterme; doğrudan uygulamaya geç.
       if (session && session.user) goToApp();
-    }).catch(function () {});
+      else revealForm();
+    }).catch(function () { revealForm(); });
   }
 })();
