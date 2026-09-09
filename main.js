@@ -148,6 +148,53 @@ function createTray() {
   tray.on('double-click', showWindow);
 }
 
+// ——— Güncellemeyi yayın durunca kendiliğinden kur ———
+// Uygulama tepside 7/24 çalıştığı için autoInstallOnAppQuit neredeyse hiç
+// tetiklenmiyor. Müşteri hiçbir şeye basmasa da güncelleme kurulmalı, ama
+// çalan müzik kesilmemeli: o an bir parça çalmıyorsa (yayın dışı saatler)
+// sessizce kurup uygulamayı yeniden açıyoruz.
+let idleInstallTimer = null;
+
+async function isBroadcastIdle() {
+  if (!mainWindow || mainWindow.isDestroyed()) return true;
+  try {
+    return await mainWindow.webContents.executeJavaScript(`(function () {
+      try {
+        var a = document.getElementById('app-audio');
+        if (!a || !a.src) return true;            // yayın dışı: kaynak yok
+        if (a.paused || a.ended) return true;
+        var dur = (window._trackDurationSec != null) ? window._trackDurationSec : a.duration;
+        if (!dur || isNaN(dur)) return true;
+        return (dur - a.currentTime) <= 1;        // parça bitmek üzere
+      } catch (e) { return false; }
+    })()`, true);
+  } catch (_) {
+    // Sayfa hazır değilse kurma; bir sonraki turda tekrar bakılır.
+    return false;
+  }
+}
+
+function startIdleInstallWatch(autoUpdater) {
+  if (idleInstallTimer) return;
+  const tick = () => {
+    isBroadcastIdle().then((idle) => {
+      if (!idle) return;
+      clearInterval(idleInstallTimer);
+      idleInstallTimer = null;
+      console.log('[AutoUpdater]: Yayın durdu, güncelleme sessizce kuruluyor.');
+      try {
+        isQuitting = true;
+        if (localServer) { try { localServer.close(); } catch (_) {} localServer = null; }
+        autoUpdater.quitAndInstall(true, true);
+      } catch (e) {
+        console.log('[AutoUpdater ERROR]: otomatik kurulum: ' + (e && e.message ? e.message : String(e)));
+      }
+    }).catch(function () {});
+  };
+  idleInstallTimer = setInterval(tick, 60 * 1000);
+  tick();
+}
+
 function sendToRenderer(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
@@ -221,6 +268,8 @@ function setupAutoUpdater() {
     if (updateCheckTimer) { clearInterval(updateCheckTimer); updateCheckTimer = null; }
     sendToRenderer('show-update-modal', { version: info.version });
     sendToRenderer('auto-updater-channel', { status: 'downloaded', version: info.version });
+    // Müşteri modala hiç dokunmasa bile yayın durduğunda kendiliğinden kurulsun.
+    startIdleInstallWatch(autoUpdater);
   });
 
   const check = () => {
@@ -261,11 +310,18 @@ ipcMain.handle('open-external', (_, url) => {
 ipcMain.on('install-update-now', () => {
   try {
     const { autoUpdater } = require('electron-updater');
+    // Elle kurulum başladı; yayın-durunca-kur gözcüsüne gerek kalmadı.
+    if (idleInstallTimer) { clearInterval(idleInstallTimer); idleInstallTimer = null; }
     // Tepsiye inme davranışı kurulumu engellemesin.
     isQuitting = true;
     // Sunucu kapanmazsa quitAndInstall sonrası port dolu kalabiliyor.
     if (localServer) { try { localServer.close(); } catch (_) {} localServer = null; }
-    autoUpdater.quitAndInstall(false, true);
+    // isSilent = true → NsisUpdater kuruluma /S geçer ve kurulum sihirbazı
+    // (İleri/İleri ekranları) hiç açılmaz. Önceden false idi; müşteri her
+    // güncellemede kurulum ekranıyla karşılaşıyordu.
+    // Kurulum per-user olduğu için (perMachine: false) UAC istemi de çıkmaz.
+    // isForceRunAfter = true → kurulum bitince uygulama kendiliğinden açılır.
+    autoUpdater.quitAndInstall(true, true);
   } catch (e) {
     console.log('[AutoUpdater ERROR]: quitAndInstall: ' + (e && e.message ? e.message : String(e)));
   }
@@ -356,6 +412,7 @@ app.on('window-all-closed', () => {
 
 app.on('quit', () => {
   if (updateCheckTimer) { clearInterval(updateCheckTimer); updateCheckTimer = null; }
+  if (idleInstallTimer) { clearInterval(idleInstallTimer); idleInstallTimer = null; }
   if (localServer) { try { localServer.close(); } catch (_) {} localServer = null; }
   if (tray) { try { tray.destroy(); } catch (_) {} tray = null; }
 });
