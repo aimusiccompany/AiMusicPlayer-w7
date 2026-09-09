@@ -8,7 +8,8 @@ import {
   VirtualPlayerState,
   FileCacheManager,
   createIndexedDBStorage,
-  createJSONStorage
+  createJSONStorage,
+  getLocalStartOfDay
 } from '@ai-music-corp/virtual-player'
 
 const DAY = 86400000 // 24 * 60 * 60 * 1000
@@ -213,9 +214,21 @@ function formatTimeOfDayMs(ms) {
 function getUpcomingSchedule(player) {
   try {
     const state = player.state.clone()
-    state.controllers.playback.state.unsafeDirectModify((s) => {
-      s.history = []
-    })
+    // history TEMIZLENMIYOR (onceden `s.history = []` yaziliyordu).
+    //
+    // Ana oynatici startRealtimeSimulation() icinde gunun basindan su ana kadar
+    // simule ediliyor, dolayisiyla history o an calan kayit dahil bugunun
+    // tamamini tasiyor. Temizlendiginde simulasyon "su an"dan basliyordu ve
+    // history'ye yalnizca su andan SONRA baslayan kayitlar giriyordu; o an calan
+    // parca listeye hic girmiyordu. snapshotToPlayerState da
+    // `devMs >= startMs && devMs < endMs` eslesmesini bulamadigi icin
+    // uygulama yeniden baslatildiginda mevcut sarki calmiyor, bir sonraki
+    // parcanin saati bekleniyordu.
+    //
+    // Klonlama mukerrer kayit uretmez: RaceAssignmentState.subscribe abone
+    // olurken prevValue'yu mevcut degerle baslatir ve anlik cagri yalnizca
+    // initialCall ile yapilir (kontrolcüler kullanmiyor); notifyInSync sadece
+    // valtio'nun senkron bildirim bayragi.
     const tempPlayer = new VirtualPlayer({ state })
     tempPlayer.fastForwardTo(DAY)
     return tempPlayer.state.controllers.playback.state.snapshot().history || []
@@ -232,21 +245,13 @@ let _scheduleRefreshScheduled = false
 let _scheduleCachePrefetch = null // İlk açılışta çalma listesini hızlandırmak için erken doldurulur
 const CACHE_TTL_MS = 5 * 60 * 1000 // 5 dk – UI donmasını azaltmak için
 
-function _scheduleRecordEnd(r) {
-  if (r.endTime != null) return r.endTime
-  const start = r.startTime != null ? r.startTime : 0
-  const dur = r.audio && r.audio.duration ? r.audio.duration : 0
-  return start + dur
-}
-/** Yeni liste geç saatten başlıyorsa (örn. istek anından veya 13:00'dan) önceki cache'deki erken parçaları koru – çalma listesi hep gün başından itibaren görünsün */
-function _mergeEarlyFromCache(fresh) {
-  if (!Array.isArray(_scheduleCache) || _scheduleCache.length === 0 || !Array.isArray(fresh) || fresh.length === 0) return fresh
-  const firstNewStart = fresh[0].startTime != null ? fresh[0].startTime : 0
-  if (firstNewStart <= 0) return fresh
-  const early = _scheduleCache.filter((r) => _scheduleRecordEnd(r) <= firstNewStart)
-  if (early.length === 0) return fresh
-  return early.concat(fresh)
-}
+/**
+ * KALDIRILDI: onceden yeni liste "su an"dan basladigi icin, gunun onceki
+ * parcalarini eski cache'ten alip basa ekliyordu. Artik getUpcomingSchedule
+ * history'yi temizlemedigi icin gunun tamami zaten geliyor; bu birlestirme
+ * gereksiz ve gun devrinde dunun kayitlarini bugune tasima riski tasiyor.
+ * Cagri yerlerinde dogrudan `fresh` kullaniliyor.
+ */
 
 function getUpcomingScheduleCached(player) {
   const now = Date.now()
@@ -290,7 +295,7 @@ function getUpcomingScheduleCached(player) {
         try {
           const fresh = getUpcomingSchedule(player)
           if (fresh && fresh.length > 0) {
-            _scheduleCache = _mergeEarlyFromCache(fresh)
+            _scheduleCache = fresh
             if (typeof window !== 'undefined' && window.requestVPSync) window.requestVPSync()
           }
         } catch (_) { /* önbelleği koru */ }
@@ -314,7 +319,7 @@ function getUpcomingScheduleCached(player) {
   _scheduleCacheKey = key
   _scheduleCacheTime = now
   if (Array.isArray(_scheduleCachePrefetch) && _scheduleCachePrefetch.length > 0) {
-    _scheduleCache = _mergeEarlyFromCache(_scheduleCachePrefetch)
+    _scheduleCache = _scheduleCachePrefetch
     _scheduleCachePrefetch = null
     return _scheduleCache
   }
@@ -323,7 +328,7 @@ function getUpcomingScheduleCached(player) {
     fresh = getUpcomingSchedule(player)
   } catch (_) { fresh = [] }
   // Boş sonucu da önbelleğe yaz; bundan sonrası hep ertelenmiş yoldan gider.
-  _scheduleCache = (fresh && fresh.length > 0) ? _mergeEarlyFromCache(fresh) : []
+  _scheduleCache = (fresh && fresh.length > 0) ? fresh : []
   return _scheduleCache
 }
 // Yenileme sonrası VP boş dönerse önceki listeyi kaybetmemek için _scheduleCache silinmez; sadece key/süre sıfırlanır
@@ -338,39 +343,48 @@ function getDeviceTimeMs() {
   return now.getHours() * 3600000 + now.getMinutes() * 60000 + now.getSeconds() * 1000 + now.getMilliseconds()
 }
 
-async function initVirtualPlayer(userId) {
-  if (!userId) return Promise.reject(new Error('userId gerekli'))
+// ——— Gün devri ———
+// VirtualPlayer gün sonunda kendini KALICI olarak durdurur: startRealtimeSimulation
+// içindeki scheduleNextAdvance, currentTime >= DAY olunca stopRealtimeSimulation()
+// çağırıp çıkar ve bir daha planlama yapmaz. Yerel gün değiştiğinde de DAY'e
+// ilerletip yeniden planlamadan çıkar. Ayrıca #advance, currentTime === DAY iken
+// hemen döner — yani oynatıcı gün sonunda donar.
+//
+// Referans VirtualPlayerProvider bunu `currentTime === DAY` aboneliğiyle yakalayıp
+// startOfDay'i bir gün ilerletiyor ve YENİ bir VirtualPlayer kuruyor. Bu port o
+// bloğu atlamıştı: 24 saat açık kalan cihazlarda yayın gün bitince duruyor ve
+// ertesi sabah (örn. 08:00) hiç başlamıyordu.
+let _activeStartOfDay = null
 
-  // Service Worker'ı hemen aktifleştir: parçalar locale cache'ten çalınsın, ağ gecikmesi olmasın
-  try {
-    await FileCacheManager.activate()
-  } catch (e) {
-    console.warn('[VP] FileCacheManager.activate:', e)
-  }
+function resetScheduleCacheForNewDay() {
+  _scheduleCacheKey = null
+  _scheduleCache = null
+  _scheduleCacheTime = 0
+  _scheduleCachePrefetch = null
+  _scheduleRefreshScheduled = false
+}
 
-  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: true,
-      detectSessionInUrl: false
-    }
-  })
+/**
+ * Tek bir yayın günü için oynatıcı kurar.
+ * dispose() tüm zamanlayıcı ve abonelikleri bırakır; gün devrinde bunlar
+ * temizlenmezse her gün bir kat daha birikirdi.
+ */
+function buildPlayerForDay(userId, client, persistStorage, startOfDay, carry, onDayEnd) {
+  const unsubs = []
+  const timers = []
 
-  const indexedDBStorage = createIndexedDBStorage()
-  const persistStorage = createJSONStorage(() => indexedDBStorage)
-  if (!persistStorage) return Promise.reject(new Error('persistStorage oluşturulamadı'))
-
-  const sharedState = new VirtualPlayerState({
+  const state = new VirtualPlayerState({
     system: {
       mode: 'cached',
-      userMuted: false,
-      userVolume: 1
+      // Gün devrinde ses/sessiz durumu korunsun; mağazada ses seviyesi sıfırlanmasın.
+      userMuted: carry && carry.userMuted != null ? carry.userMuted : false,
+      userVolume: carry && carry.userVolume != null ? carry.userVolume : 1
     }
   })
 
-  const player = new VirtualPlayer({ userId, state: sharedState, maxDeltaTime: 10000 })
+  const player = new VirtualPlayer({ userId, startOfDay, state, maxDeltaTime: 10000 })
   // maxDeltaTime: yerel simülasyon adımı (ağ isteği değil). Ağ: Fetcher 1 dk, presence heartbeat 3 dk.
-  // Referans (VirtualPlayerProvider): güne 0’dan başla, sonra startRealtimeSimulation tek sefer getLocalTime() % DAY’e sarar
+  // Referans (VirtualPlayerProvider): güne 0'dan başla, sonra startRealtimeSimulation tek sefer getLocalTime() % DAY'e sarar
   player.state.system.unsafeDirectModify({ deltaTime: 0, currentTime: 0 })
   player.use(client, persistStorage)
   player.startRealtimeSimulation()
@@ -389,7 +403,7 @@ async function initVirtualPlayer(userId) {
   if (typeof requestIdleCallback !== 'undefined') {
     requestIdleCallback(doPrefetch, { timeout: 200 })
   } else {
-    setTimeout(doPrefetch, 50)
+    timers.push(setTimeout(doPrefetch, 50))
   }
 
   if (typeof window !== 'undefined') {
@@ -471,30 +485,55 @@ async function initVirtualPlayer(userId) {
 
   // Referans (use-virtual-player): selector değişen değeri döndürmeli; () => true callback'ı tetiklemez (equals aynı kalır).
   const systemSelector = (s) => ({ activeRecord: s.activeRecord, currentTime: s.currentTime })
-  player.state.system.subscribe(systemSelector, syncState, { notifyInSync: true })
+  unsubs.push(player.state.system.subscribe(systemSelector, syncState, { notifyInSync: true }))
   const playbackSelector = (s) => ({ songPlayState: s.songPlayState, historyLength: (s.history && s.history.length) || 0 })
-  player.state.controllers.playback.state.subscribe(playbackSelector, syncState, { notifyInSync: true })
+  unsubs.push(player.state.controllers.playback.state.subscribe(playbackSelector, syncState, { notifyInSync: true }))
   if (player.state.controllers.playlist && player.state.controllers.playlist.state) {
-    player.state.controllers.playlist.state.subscribe((s) => s.activePlaylist, syncState, { notifyInSync: true })
-    player.state.controllers.playlist.state.subscribe((s) => (s.playlists && s.playlists.length) || 0, syncState, { notifyInSync: true })
+    unsubs.push(player.state.controllers.playlist.state.subscribe((s) => s.activePlaylist, syncState, { notifyInSync: true }))
+    unsubs.push(player.state.controllers.playlist.state.subscribe((s) => (s.playlists && s.playlists.length) || 0, syncState, { notifyInSync: true }))
   }
   if (player.state.controllers.ad && player.state.controllers.ad.state) {
-    player.state.controllers.ad.state.subscribe((s) => (s.schedules && s.schedules.length) || 0, syncState, { notifyInSync: true })
+    unsubs.push(player.state.controllers.ad.state.subscribe((s) => (s.schedules && s.schedules.length) || 0, syncState, { notifyInSync: true }))
   }
   if (player.state.controllers.specialAd && player.state.controllers.specialAd.state) {
-    player.state.controllers.specialAd.state.subscribe((s) => (s.schedules && s.schedules.length) || 0, syncState, { notifyInSync: true })
+    unsubs.push(player.state.controllers.specialAd.state.subscribe((s) => (s.schedules && s.schedules.length) || 0, syncState, { notifyInSync: true }))
   }
   if (player.state.controllers.stockAd && player.state.controllers.stockAd.state) {
-    player.state.controllers.stockAd.state.subscribe((s) => (s.schedules && s.schedules.length) || 0, syncState, { notifyInSync: true })
+    unsubs.push(player.state.controllers.stockAd.state.subscribe((s) => (s.schedules && s.schedules.length) || 0, syncState, { notifyInSync: true }))
   }
 
-  // Referans (React): periyodik fastForwardTo yok; VP startRealtimeSimulation() içinde tek sefer getLocalTime() % DAY’e sarıyor, sonra setTimeout ile senkron kalıyor.
-  return player.readyPromise.then(() => {
+  // Gün sonu tetikleyicisi HER gün için kurulmalı; yalnızca ilk oynatıcıya
+  // bağlanırsa devirden sonraki günlerde çalışmaz.
+  if (typeof onDayEnd === 'function') {
+    unsubs.push(player.state.system.subscribe(
+      (s) => s.currentTime >= DAY,
+      (isDayEnd) => {
+        if (!isDayEnd) return
+        // ÖNEMLİ: bu abonelik notifyInSync olduğu için #advance döngüsünün
+        // içinden, state.commit() sırasında senkron çağrılıyor. Devri burada
+        // yapmak, çalışmakta olan simülasyonun oynatıcısını kendi içinden yok
+        // etmek demek. Bir sonraki makro göreve bırakıyoruz.
+        setTimeout(onDayEnd, 0)
+      },
+      { notifyInSync: true }
+    ))
+  }
+
+  const dispose = () => {
+    timers.forEach((t) => { try { clearTimeout(t); clearInterval(t) } catch (_) {} })
+    timers.length = 0
+    unsubs.forEach((fn) => { try { typeof fn === 'function' && fn() } catch (_) {} })
+    unsubs.length = 0
+    try { player.stopRealtimeSimulation() } catch (_) {}
+  }
+
+  // Referans (React): periyodik fastForwardTo yok; VP startRealtimeSimulation() içinde tek sefer getLocalTime() % DAY'e sarıyor, sonra setTimeout ile senkron kalıyor.
+  const ready = player.readyPromise.then(() => {
     syncState()
-    setTimeout(syncState, 500)
-    setTimeout(syncState, 1500)
-    setInterval(syncState, 1000)
-    setInterval(function () {
+    timers.push(setTimeout(syncState, 500))
+    timers.push(setTimeout(syncState, 1500))
+    timers.push(setInterval(syncState, 1000))
+    timers.push(setInterval(function () {
       // DİKKAT: burada _scheduleCacheTime = 0 yazılıyordu. 0 falsy olduğu için
       // getUpcomingScheduleCached'deki `cacheExpired` kontrolü false kalıyor,
       // ertelenmiş yenileme yolu atlanıyor ve fastForwardTo(DAY) — yani 24
@@ -503,12 +542,85 @@ async function initVirtualPlayer(userId) {
       // 1 yazınca cache "çok eski" sayılır ve yenileme requestIdleCallback'e alınır.
       _scheduleCacheTime = 1
       syncState()
-    }, 5 * 60 * 1000)
+    }, 5 * 60 * 1000))
     return player
   })
+
+  return { player, dispose, ready }
+}
+
+async function initVirtualPlayer(userId) {
+  if (!userId) return Promise.reject(new Error('userId gerekli'))
+
+  // Service Worker'ı hemen aktifleştir: parçalar locale cache'ten çalınsın, ağ gecikmesi olmasın
+  try {
+    await FileCacheManager.activate()
+  } catch (e) {
+    console.warn('[VP] FileCacheManager.activate:', e)
+  }
+
+  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false
+    }
+  })
+
+  const indexedDBStorage = createIndexedDBStorage()
+  const persistStorage = createJSONStorage(() => indexedDBStorage)
+  if (!persistStorage) return Promise.reject(new Error('persistStorage oluşturulamadı'))
+
+  let current = null
+  let rolling = false
+
+  function startDay(startOfDay, carry) {
+    if (current) {
+      try { current.dispose() } catch (_) {}
+      current = null
+    }
+    // Yeni günün akışı sıfırdan hesaplansın; dünün listesi taşınmasın.
+    resetScheduleCacheForNewDay()
+    _activeStartOfDay = startOfDay
+    current = buildPlayerForDay(userId, client, persistStorage, startOfDay, carry, maybeRollOver)
+    return current.ready
+  }
+
+  // Gün gerçekten değiştiyse oynatıcıyı yeniden kur.
+  // Yerel gün kontrolü şart: simülasyon yerel gece yarısından birkaç ms önce
+  // DAY'e ulaşırsa, tarih hâlâ eski gün olacağı için koşulsuz yeniden kurmak
+  // sonsuz döngü yaratırdı.
+  function maybeRollOver() {
+    if (rolling) return
+    const today = getLocalStartOfDay()
+    if (_activeStartOfDay != null && today === _activeStartOfDay) return
+    rolling = true
+    let carry = null
+    try {
+      const sys = current && current.player.state.system.snapshot()
+      if (sys) carry = { userVolume: sys.userVolume, userMuted: sys.userMuted }
+    } catch (_) {}
+    startDay(today, carry)
+      .catch((e) => console.warn('[VP] gün devri:', e))
+      .then(() => { rolling = false }, () => { rolling = false })
+  }
+
+  // Tetikleyici 1: simülasyon gün sonuna ulaştı.
+  // Tetikleyici 2: dakikalık kontrol — DAY olayı kaçarsa, cihaz uykuya girip
+  // uyanırsa veya saat elle değiştirilirse yine de yakalanır.
+  const dayWatch = setInterval(maybeRollOver, 60 * 1000)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', () => {
+      clearInterval(dayWatch)
+      if (current) { try { current.dispose() } catch (_) {} }
+    })
+  }
+
+  return startDay(getLocalStartOfDay(), null)
 }
 
 if (typeof window !== 'undefined') {
   window.initVirtualPlayer = initVirtualPlayer
 }
-export { initVirtualPlayer }
+// snapshotToPlayerState test edilebilsin diye disa aciliyor (IIFE derlemesinde davranisi degistirmez)
+export { initVirtualPlayer, snapshotToPlayerState }
