@@ -220,6 +220,13 @@ function setupAutoUpdater() {
     autoUpdater.allowUpdatesInDevelopment = true;
   }
   autoUpdater.channel = 'latest';
+  // DİKKAT: `channel` setter'ı allowDowngrade'i sessizce true yapıyor
+  // (electron-updater AppUpdater.js: set channel -> this.allowDowngrade = true).
+  // Bu yüzden SONRASINDA açıkça kapatıyoruz. Aksi halde feed bir kez eski bir
+  // sürüm gösterirse (silinen release, hatalı yayın, yanlış latest.yml) tüm
+  // cihazlar kendini sessizce geri alırdı — otomatik sessiz kurulumla birlikte
+  // bu kimsenin fark etmeyeceği bir sürüm düşürmesi demek.
+  autoUpdater.allowDowngrade = false;
 
   autoUpdater.setFeedURL({
     provider: 'github',
