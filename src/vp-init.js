@@ -11,6 +11,7 @@ import {
   createJSONStorage,
   getLocalStartOfDay
 } from '@ai-music-corp/virtual-player'
+import pkg from '../package.json'
 
 const DAY = 86400000 // 24 * 60 * 60 * 1000
 
@@ -381,7 +382,10 @@ function buildPlayerForDay(userId, client, persistStorage, startOfDay, carry, on
   const state = new VirtualPlayerState({
     system: {
       mode: 'cached',
-      volume: carriedVolume != null ? carriedVolume : 1
+      volume: carriedVolume != null ? carriedVolume : 1,
+      // Sürüm bilgisi presence_heartbeat ile panele gider (Online/Offline sayfası).
+      // Eskiden boştu; Win7 cihazlar panelde "N/A" görünüyordu. 1.1.x = Win7 derlemesi.
+      versionInfo: { version: pkg.version, platform: 'win7' }
     }
   })
 
