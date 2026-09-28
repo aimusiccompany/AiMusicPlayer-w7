@@ -74,3 +74,32 @@ npm run dist
 - **npm run dist:32** — Sadece 32 bit.
 
 Kurulumda klasör seçilebilir, kısayol oluşturulur, Türkçe dil kullanılır. İkon için `Assets/icon.ico` ekleyebilirsiniz (opsiyonel).
+
+## Sürüm notları
+
+### 1.1.42 — yayın akışı yeni oynatıcıya (1.0.45) uyarlandı
+Electron sürümü, mimari (32+64 bit tek kurulum) ve güncelleme yolu (GitHub Releases) değişmedi.
+
+- **Çalınacak kayıt kütüphanenin canlı kaydından** (`system.activeRecord`) seçilir; günlük zaman
+  çizelgesi yalnızca liste görünümü ve yedektir. Eskiden yalnızca çizelgedeki slot çalınıyordu;
+  program değişince (panelden playlist/reklam güncellemesi) kütüphanenin çaldığı ile çizelge
+  ayrışıyor, yenilemede parça ortasında geçiş isteniyor ve slot çoktan bittiği için sıradaki
+  slota kadar sessizlik oluşuyordu. Canlı kayıt cihaz saatini kapsamıyorsa (döngü takıldı)
+  çizelgedeki slota düşülür.
+- **API isteklerine 45 sn zaman aşımı** (`renderer.js` fetch sarmalayıcısı, tek Supabase istemcisi):
+  yanıtsız kalan tek istek yayını "hazırlanıyor"da bırakıyordu.
+- **401 → oturumu bir kez yenile → olmuyorsa çıkış**: süresi geçmiş oturumla sürekli 401 alan
+  cihazlar sunucuya yük bindiriyor ve sessiz kalıyordu.
+- **Gün devrinde ağ yoksa önceki günün akışıyla devam**: yeni günün listesi boşsa ve son 5 dk'da ağ
+  hatası varsa önceki günün playlist ve reklam listeleri geçici konur; ağ gelince kütüphanenin
+  kendi güncellemesi ezer.
+- **Ses seviyesi kalıcı** (`localStorage aimusic_volume`, 0–1): her açılışta %100'e dönmüyor.
+  Duraklatma (ses 0) kaydedilmez.
+- **Hoparlör**: kayıtlı cihaz kimliği kaybolursa aynı adlı cihaz bulunur, yoksa sistem varsayılanı.
+- **Şarkılar R2'den** (`cdn.aimusic.com.tr`), veritabanı adresi değişmeden; R2'de olmayan dosya için
+  Supabase'e dönülür, R2 ulaşılamazsa 10 dk Supabase.
+- **Güncelleme kurulumu öncesi tam kapanış** (pencere, tepsi, yerel sunucu; 5 sn sonra zorunlu
+  çıkış): "Failed to uninstall old application files: 2" hatasının önüne geçer.
+- **Gösterim koruması daraltıldı**: yayın bitince son parça "çalıyor" görünmüyor; kapalı günde gece
+  yarısı dünün son şarkısı bir kez daha çalmıyor.
+- Testler: `npm test` (20 kontrol; canlı kayıt önceliği ve takılma yedeği eklendi).

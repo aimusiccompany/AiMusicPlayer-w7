@@ -1,6 +1,61 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, Tray, Menu, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Tray, Menu, powerSaveBlocker, session } = require('electron');
 const path = require('path');
 const { serve } = require('./server.js');
+
+// ——— Şarkılar R2'den (cdn.aimusic.com.tr), veritabanı adresi değişmeden ———
+// Yeni oynatıcı (1.0.44) ile aynı: veritabanındaki şarkı adresleri Supabase'de kalır (eski
+// cihazlar oradan indirmeye devam eder); bu sürüm ağ katmanında Supabase şarkı isteklerini
+// R2'ye yönlendirir. Yönlendirme Chromium ağ servisinde yapıldığı için service worker'ın
+// önbelleği eski adresle anahtarlanmış kalır: yeniden indirme yok, kütüphaneye dokunulmaz.
+// R2'de bulunmayan (404/403) bir dosya bir kez görülürse o dosya için yönlendirme kapatılır;
+// R2'ye ulaşılamıyorsa 10 dk boyunca Supabase kullanılır.
+const SUPABASE_SONGS_PREFIX = 'https://api.aimusic.com.tr/storage/v1/object/public/songs/';
+const R2_SONGS_PREFIX = 'https://cdn.aimusic.com.tr/';
+const SONG_OBJECT_PATTERN = /^[a-f0-9]{40}\.(mp3|m4a|wav|ogg)$/i;
+const R2_COOLDOWN_MS = 10 * 60 * 1000;
+const r2MissingObjects = new Set();
+let r2UnavailableUntil = 0;
+
+function markR2Unavailable(reason) {
+  const wasAvailable = r2UnavailableUntil <= Date.now();
+  r2UnavailableUntil = Date.now() + R2_COOLDOWN_MS;
+  if (wasAvailable) console.log('[Media]: R2\'ye ulaşılamıyor (' + reason + '); 10 dk Supabase\'den indirilecek');
+}
+
+function installMediaSourceRedirect() {
+  try {
+    const ses = session.defaultSession;
+    ses.webRequest.onBeforeRequest({ urls: [SUPABASE_SONGS_PREFIX + '*'] }, (details, callback) => {
+      const objectName = details.url.slice(SUPABASE_SONGS_PREFIX.length).split('?')[0];
+      if (!SONG_OBJECT_PATTERN.test(objectName) || r2MissingObjects.has(objectName) || r2UnavailableUntil > Date.now()) {
+        callback({});
+        return;
+      }
+      callback({ redirectURL: R2_SONGS_PREFIX + objectName });
+    });
+
+    ses.webRequest.onHeadersReceived({ urls: [R2_SONGS_PREFIX + '*'] }, (details, callback) => {
+      const objectName = details.url.slice(R2_SONGS_PREFIX.length).split('?')[0];
+      if (details.statusCode === 404 || details.statusCode === 403) {
+        if (SONG_OBJECT_PATTERN.test(objectName) && !r2MissingObjects.has(objectName)) {
+          r2MissingObjects.add(objectName);
+          console.log('[Media]: R2\'de bulunamadı (' + details.statusCode + '), Supabase\'e dönülüyor: ' + objectName);
+        }
+      } else if (details.statusCode >= 500) {
+        markR2Unavailable('HTTP ' + details.statusCode);
+      }
+      callback({});
+    });
+
+    ses.webRequest.onErrorOccurred({ urls: [R2_SONGS_PREFIX + '*'] }, (details) => {
+      if (details.error && details.error !== 'net::ERR_ABORTED') markR2Unavailable(details.error);
+    });
+
+    console.log('[Media]: Şarkı istekleri R2 (cdn.aimusic.com.tr) üzerinden sunulacak');
+  } catch (e) {
+    console.log('[Media ERROR]: yönlendirme kurulamadı: ' + (e && e.message ? e.message : String(e)));
+  }
+}
 
 let mainWindow = null;
 let localServer = null;
@@ -174,6 +229,42 @@ async function isBroadcastIdle() {
   }
 }
 
+/**
+ * İndirilmiş güncellemeyi kur. Kurucu "Failed to uninstall old application files: 2"
+ * verebiliyordu: eski sürümün kaldırıcısı çalışırken uygulama süreci hâlâ açık kalıyordu
+ * (pencere/tepsi/yerel sunucu kapanışı uzuyor). Kurulum öncesi pencere, tepsi ve yerel sunucu
+ * kapatılır; kurucu başlatıldıktan sonra süreç 5 sn içinde kendiliğinden bitmezse zorla
+ * sonlandırılır ki kaldırıcı dosyaları silebilsin.
+ */
+let installInProgress = false;
+function installDownloadedUpdate(autoUpdater, reason) {
+  if (installInProgress) return;
+  installInProgress = true;
+  isQuitting = true;
+  console.log('[AutoUpdater]: Güncelleme kuruluyor (' + reason + ').');
+  if (idleInstallTimer) { clearInterval(idleInstallTimer); idleInstallTimer = null; }
+  if (updateCheckTimer) { clearInterval(updateCheckTimer); updateCheckTimer = null; }
+  try { if (tray) { tray.destroy(); tray = null; } } catch (e) { console.log('[AutoUpdater]: tepsi kapatılamadı: ' + (e && e.message)); }
+  try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy(); } catch (e) { console.log('[AutoUpdater]: pencere kapatılamadı: ' + (e && e.message)); }
+  // Sunucu kapanmazsa quitAndInstall sonrası port dolu kalabiliyor.
+  if (localServer) { try { localServer.close(); } catch (_) {} localServer = null; }
+  const forceExit = setTimeout(() => {
+    console.log('[AutoUpdater]: kurulum için süreç zorla sonlandırılıyor');
+    app.exit(0);
+  }, 5000);
+  setImmediate(() => {
+    try {
+      // isSilent = true → kurulum sihirbazı açılmaz; isForceRunAfter = true → kurulum bitince uygulama açılır.
+      autoUpdater.quitAndInstall(true, true);
+    } catch (e) {
+      console.log('[AutoUpdater ERROR]: quitAndInstall: ' + (e && e.message ? e.message : String(e)));
+      clearTimeout(forceExit);
+      installInProgress = false;
+      isQuitting = false;
+    }
+  });
+}
+
 function startIdleInstallWatch(autoUpdater) {
   if (idleInstallTimer) return;
   const tick = () => {
@@ -181,14 +272,7 @@ function startIdleInstallWatch(autoUpdater) {
       if (!idle) return;
       clearInterval(idleInstallTimer);
       idleInstallTimer = null;
-      console.log('[AutoUpdater]: Yayın durdu, güncelleme sessizce kuruluyor.');
-      try {
-        isQuitting = true;
-        if (localServer) { try { localServer.close(); } catch (_) {} localServer = null; }
-        autoUpdater.quitAndInstall(true, true);
-      } catch (e) {
-        console.log('[AutoUpdater ERROR]: otomatik kurulum: ' + (e && e.message ? e.message : String(e)));
-      }
+      installDownloadedUpdate(autoUpdater, 'yayın durdu');
     }).catch(function () {});
   };
   idleInstallTimer = setInterval(tick, 60 * 1000);
@@ -317,18 +401,7 @@ ipcMain.handle('open-external', (_, url) => {
 ipcMain.on('install-update-now', () => {
   try {
     const { autoUpdater } = require('electron-updater');
-    // Elle kurulum başladı; yayın-durunca-kur gözcüsüne gerek kalmadı.
-    if (idleInstallTimer) { clearInterval(idleInstallTimer); idleInstallTimer = null; }
-    // Tepsiye inme davranışı kurulumu engellemesin.
-    isQuitting = true;
-    // Sunucu kapanmazsa quitAndInstall sonrası port dolu kalabiliyor.
-    if (localServer) { try { localServer.close(); } catch (_) {} localServer = null; }
-    // isSilent = true → NsisUpdater kuruluma /S geçer ve kurulum sihirbazı
-    // (İleri/İleri ekranları) hiç açılmaz. Önceden false idi; müşteri her
-    // güncellemede kurulum ekranıyla karşılaşıyordu.
-    // Kurulum per-user olduğu için (perMachine: false) UAC istemi de çıkmaz.
-    // isForceRunAfter = true → kurulum bitince uygulama kendiliğinden açılır.
-    autoUpdater.quitAndInstall(true, true);
+    installDownloadedUpdate(autoUpdater, 'kullanıcı onayı');
   } catch (e) {
     console.log('[AutoUpdater ERROR]: quitAndInstall: ' + (e && e.message ? e.message : String(e)));
   }
@@ -392,6 +465,7 @@ function bootstrap() {
   app.whenReady().then(() => {
     return startLocalServer().then((server) => {
       localServer = server;
+      installMediaSourceRedirect();
       createWindow();
       createTray();
       setupAutoLaunch();

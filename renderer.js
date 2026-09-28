@@ -149,6 +149,90 @@
   var SUPABASE_URL = 'https://api.aimusic.com.tr';
   var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp1aXN1aHVlcHZxc2Nzd2NvY3FpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTgwNDUzODUsImV4cCI6MjAzMzYyMTM4NX0.Lo0dFFPUNvsLIBxitmsi_mmTtDlVABsqgd74rGrvHq0';
 
+  // ——— API istekleri (yeni oynatıcı ile aynı davranış) ———
+  // 1) Zaman aşımı: bazı mağaza ağlarında (vekil sunucu / güvenlik duvarı) istek yanıtsız
+  //    kalıyor. Kütüphane gün başında tüm fetcher'ları bekleyerek başladığı için tek takılan
+  //    istek yayını sonsuza kadar "hazırlanıyor"da bırakıyordu. 45 sn sonra istek kesilir.
+  // 2) Ağ hatası olayı: gün devrinde ağ yoksa önceki günün akışıyla devam kararı buna bakar.
+  // 3) 401: oturum bir kez yenilenir; olmuyorsa çıkış yapılır. Eskiden süresi geçmiş oturumla
+  //    her dakika 401 alan cihazlar sunucuya boşuna yük bindiriyor ve sessiz kalıyordu.
+  // Ses dosyaları (storage) bu sarmalayıcıdan etkilenmez.
+  var API_TIMEOUT_MS = 45 * 1000;
+  function isApiRequest(url) {
+    return typeof url === 'string' && url.indexOf(SUPABASE_URL) === 0 &&
+      (url.indexOf('/rest/v1/') !== -1 || url.indexOf('/auth/v1/') !== -1 || url.indexOf('/functions/v1/') !== -1);
+  }
+  function reportApiFailure(url) {
+    try { window.dispatchEvent(new CustomEvent('api-fetch-failed', { detail: { url: url } })); } catch (_) {}
+  }
+  var nativeFetch = window.fetch.bind(window);
+  var refreshingSession = null;
+  var sessionExpiredHandled = false;
+  function refreshSessionOnce() {
+    if (refreshingSession) return refreshingSession;
+    var client = window.supabaseClient;
+    if (!client || !client.auth) return Promise.resolve(false);
+    refreshingSession = client.auth.refreshSession()
+      .then(function (res) { return !!(res && res.data && res.data.session) && !res.error; })
+      .catch(function () { return false; })
+      .then(function (ok) {
+        // Aynı anda gelen 401 yığını tek yenilemeyle karşılansın
+        setTimeout(function () { refreshingSession = null; }, 30000);
+        return ok;
+      });
+    return refreshingSession;
+  }
+  function handleUnauthorized() {
+    return refreshSessionOnce().then(function (ok) {
+      if (ok || sessionExpiredHandled) return;
+      sessionExpiredHandled = true;
+      try { window.dispatchEvent(new CustomEvent('api-session-expired')); } catch (_) {}
+    });
+  }
+  window.__aiApiFetch = function (input, init) {
+    var url = typeof input === 'string' ? input : ((input && input.url) || '');
+    var isApi = isApiRequest(url);
+    var options = init || {};
+    var timer = null;
+    if (isApi && !options.signal && typeof AbortController === 'function') {
+      var controller = new AbortController();
+      options = Object.assign({}, options, { signal: controller.signal });
+      timer = setTimeout(function () { controller.abort(); }, API_TIMEOUT_MS);
+    }
+    return nativeFetch(input, options).then(function (response) {
+      if (timer) clearTimeout(timer);
+      if (isApi && response && response.status === 401 && url.indexOf('/auth/v1/') === -1) {
+        handleUnauthorized();
+      }
+      return response;
+    }, function (err) {
+      if (timer) clearTimeout(timer);
+      if (isApi) reportApiFailure(url);
+      throw err;
+    });
+  };
+
+  // ——— Ses seviyesi kalıcı (yeni oynatıcı ile aynı anahtar: 0–1) ———
+  // Eskiden her açılışta %100'e dönüyordu ("ses kendi kendine değişiyor" şikâyeti).
+  var VOLUME_KEY = 'aimusic_volume';
+  function readSavedVolumePct() {
+    try {
+      var raw = localStorage.getItem(VOLUME_KEY);
+      if (raw == null) return 70;
+      var v = Number(raw);
+      if (!isFinite(v)) return 70;
+      return Math.round(Math.min(1, Math.max(0, v)) * 100);
+    } catch (_) { return 70; }
+  }
+  function saveVolumePct(pct) {
+    try {
+      var v = Number(pct);
+      if (!isFinite(v)) return;
+      localStorage.setItem(VOLUME_KEY, String(Math.min(1, Math.max(0, v / 100))));
+    } catch (_) {}
+  }
+  var initialVolumePct = readSavedVolumePct();
+
   // ——— Virtual Player entegrasyonu için state (Kurulum ile aynı: playlist, upcomingSchedule, vb.) ———
   window.playerState = {
     playlist: [],
@@ -158,8 +242,8 @@
     isPlaying: false,
     currentTime: 0,
     duration: 0,
-    volume: 70,
-    savedVolumeBeforeMute: 70,
+    volume: initialVolumePct,
+    savedVolumeBeforeMute: initialVolumePct,
     mutedByPause: false,
     location: null,
     status: 'offline'
@@ -188,17 +272,45 @@
 
   // Seçilen hoparlör de kalıcı olmalı; mağaza cihazı her açılışta varsayılana dönmesin.
   var SINK_STORAGE_KEY = 'aimusic-speaker-id';
+  var SINK_LABEL_KEY = 'aimusic-speaker-label';
 
   function getSavedSinkId() {
     try { return localStorage.getItem(SINK_STORAGE_KEY) || 'default'; } catch (_) { return 'default'; }
   }
 
+  /**
+   * Kayıtlı cihaz kimliği artık listede yoksa (USB/HDMI hoparlör yeniden takıldı, Windows
+   * yeniden numaralandırdı) aynı ADLA kayıtlı cihazı bulur; bulunamazsa 'default' döner ki
+   * ses sistem varsayılanına gitsin, cihaz sessiz kalmasın.
+   */
+  function resolveSinkId(id) {
+    if (!id || id === 'default') return Promise.resolve('default');
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') return Promise.resolve(id);
+    return navigator.mediaDevices.enumerateDevices().then(function (devices) {
+      var outputs = devices.filter(function (d) { return d.kind === 'audiooutput'; });
+      if (!outputs.length) return id;
+      if (outputs.some(function (d) { return d.deviceId === id; })) return id;
+      var label = null;
+      try { label = localStorage.getItem(SINK_LABEL_KEY); } catch (_) {}
+      var byLabel = label ? outputs.filter(function (d) { return d.label && d.label === label; })[0] : null;
+      if (byLabel) {
+        console.warn('[ses çıkışı] cihaz kimliği değişmiş, ada göre bulundu:', label);
+        try { localStorage.setItem(SINK_STORAGE_KEY, byLabel.deviceId); } catch (_) {}
+        return byLabel.deviceId;
+      }
+      console.warn('[ses çıkışı] kayıtlı hoparlör bulunamadı, sistem varsayılanı kullanılıyor');
+      return 'default';
+    }).catch(function () { return id; });
+  }
+
   function applySinkId(id) {
     var audio = document.getElementById('app-audio');
     if (!audio || typeof audio.setSinkId !== 'function') return;
-    audio.setSinkId(id).catch(function () {
-      // Cihaz artık takılı değilse varsayılana dön.
-      if (id !== 'default') audio.setSinkId('default').catch(function () {});
+    resolveSinkId(id).then(function (target) {
+      audio.setSinkId(target).catch(function () {
+        // Cihaz artık takılı değilse varsayılana dön.
+        if (target !== 'default') audio.setSinkId('default').catch(function () {});
+      });
     });
   }
 
@@ -912,6 +1024,7 @@
     if (s.mutedByPause) {
       s.mutedByPause = false;
       s.volume = s.savedVolumeBeforeMute;
+      saveVolumePct(s.volume);
       if (window.virtualPlayer && window.virtualPlayer.state && window.virtualPlayer.state.controllers.playback) {
         window.virtualPlayer.state.controllers.playback.setDesiredVolume(s.volume / 100);
       }
@@ -994,8 +1107,13 @@
   if (speakerSelect) {
     speakerSelect.addEventListener('change', function () {
       var id = this.value;
+      var opt = this.options[this.selectedIndex];
       // dataset'te tutulduğu için seçim her yeniden başlatmada varsayılana dönüyordu.
-      try { localStorage.setItem(SINK_STORAGE_KEY, id); } catch (_) {}
+      try {
+        localStorage.setItem(SINK_STORAGE_KEY, id);
+        if (id && id !== 'default' && opt && opt.textContent) localStorage.setItem(SINK_LABEL_KEY, opt.textContent);
+        else localStorage.removeItem(SINK_LABEL_KEY);
+      } catch (_) {}
       applySinkId(id);
     });
   }
@@ -1084,6 +1202,12 @@
   document.getElementById('settings-logout')?.addEventListener('click', function (e) {
     e.preventDefault();
     openLogoutConfirm();
+  });
+
+  // API 401 verdi ve oturum yenilenemedi: sorgulamayı sürdürmek yerine giriş ekranına dön.
+  window.addEventListener('api-session-expired', function () {
+    console.warn('[oturum] yenilenemedi, giriş ekranına dönülüyor');
+    doLogout();
   });
   document.getElementById('logout-confirm')?.addEventListener('click', function () {
     var btn = this;
@@ -1347,9 +1471,11 @@
     if (pct) pct.textContent = v + '%';
     if (window.playerState.mutedByPause) {
       window.playerState.savedVolumeBeforeMute = v;
+      saveVolumePct(v);
       return;
     }
     window.playerState.volume = v;
+    saveVolumePct(v);
     if (window.virtualPlayer && window.virtualPlayer.state && window.virtualPlayer.state.controllers.playback) {
       window.virtualPlayer.state.controllers.playback.setDesiredVolume(v / 100);
     }
@@ -1384,8 +1510,12 @@
 
   // Supabase ve oturum kontrolü; sonra uygulamayı başlat
   if (typeof supabase !== 'undefined') {
+    // Tek istemci: Virtual Player da bu istemciyi kullanır (src/vp-init.js). Eskiden iki ayrı
+    // GoTrueClient aynı oturumu yeniliyordu; yenileme jetonu döndürüldüğü için ikincisi
+    // "Invalid Refresh Token" alıp oturumu düşürebiliyordu.
     window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: false }
+      auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: false },
+      global: { fetch: window.__aiApiFetch }
     });
     window.supabaseClient.auth.getSession()
       .then(function (result) {

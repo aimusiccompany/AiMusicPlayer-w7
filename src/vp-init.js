@@ -18,26 +18,46 @@ const DAY = 86400000 // 24 * 60 * 60 * 1000
 const SUPABASE_URL = 'https://api.aimusic.com.tr'
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp1aXN1aHVlcHZxc2Nzd2NvY3FpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTgwNDUzODUsImV4cCI6MjAzMzYyMTM4NX0.Lo0dFFPUNvsLIBxitmsi_mmTtDlVABsqgd74rGrvHq0'
 
+/**
+ * Çalınacak kayıt seçimi (yeni oynatıcı ile aynı ilke): kütüphanenin gerçek zamanlı
+ * simülasyonunun CANLI kaydı (system.activeRecord) asıl kaynaktır; liste için hesaplanan
+ * günlük zaman çizelgesi yalnızca görünüm ve yedektir.
+ *
+ * Eskiden yalnızca zaman çizelgesindeki slot çalınıyordu. Çizelge bir tahmindir ve en fazla
+ * 5 dk'da bir yenilenir; program değişince (panelden playlist güncellemesi, reklam ekleme)
+ * kütüphanenin gerçekten çaldığı kayıtla çizelgedeki slot ayrışıyor, yenilemede parça
+ * ortasında geçiş isteniyor ve geçiş sırası geldiğinde slot çoktan bitmiş oluyordu →
+ * sıradaki slota kadar sessizlik.
+ *
+ * Canlı kayıt cihaz saatini kapsamıyorsa (kütüphane döngüsü takıldı / henüz hazır değil)
+ * çizelgedeki slota düşülür; ikisi de yoksa kayıt yok.
+ */
 function snapshotToPlayerState(system, playback, playlist, ad, specialAd, stockAd, upcomingSchedule = [], deviceTimeMs = null) {
   const sys = system || {}
   const devMs = deviceTimeMs != null ? deviceTimeMs : getDeviceTimeMs()
-  let rec = sys.activeRecord || (playback || {}).activeRecord
+  const live = sys.activeRecord && sys.activeRecord.audio && sys.activeRecord.audio.url ? sys.activeRecord : null
+  const liveStart = live ? (live.startTime != null ? live.startTime : 0) : 0
+  const liveEnd = live ? liveStart + (live.audio.duration || 0) : 0
+  const liveCurrent = !!live && devMs >= liveStart - 1000 && devMs < liveEnd + 2000
+  let rec = liveCurrent ? live : null
   let deviceTimeRecordIndex = -1
-  if (!upcomingSchedule || upcomingSchedule.length === 0) {
-    rec = null
-  } else {
+  if (upcomingSchedule && upcomingSchedule.length > 0) {
     for (let i = 0; i < upcomingSchedule.length; i++) {
       const r = upcomingSchedule[i]
       const startMs = r.startTime != null ? r.startTime : 0
       const endMs = r.endTime != null ? r.endTime : (startMs + (r.audio && r.audio.duration ? r.audio.duration : 0))
-      if (devMs >= startMs && devMs < endMs) {
+      if (rec) {
+        // Canlı kaydın listedeki yeri: çizelgenin geçmiş kısmı gerçek geçmiştir, başlangıç saati birebir eşleşir
+        if (startMs === liveStart && r.type === rec.type) {
+          deviceTimeRecordIndex = i
+          break
+        }
+      } else if (devMs >= startMs && devMs < endMs) {
         rec = r
         deviceTimeRecordIndex = i
         break
       }
     }
-    // Hiçbir slotta değilsek (deviceTimeRecordIndex < 0) çalma; 24:00 placeholder tek kayıt olabilir
-    if (deviceTimeRecordIndex < 0) rec = null
   }
   // Yayın bitmiş say: sadece gerçekten son kayıt bittiyse (24:00 placeholder hariç)
   let broadcastEnded = false
@@ -344,6 +364,74 @@ function getDeviceTimeMs() {
   return now.getHours() * 3600000 + now.getMinutes() * 60000 + now.getSeconds() * 1000 + now.getMilliseconds()
 }
 
+/** Çalmakta olan parçadan geriye kalan süre (ms). Yoksa 0. */
+function playingRemainingMs() {
+  try {
+    if (typeof document === 'undefined') return 0
+    const a = document.getElementById('app-audio')
+    if (!a || !a.src) return 0
+    const dur = (typeof window !== 'undefined' && window._trackDurationSec != null)
+      ? window._trackDurationSec
+      : (a.duration && !isNaN(a.duration) ? a.duration : 0)
+    if (!dur) return 0
+    const rem = (dur - a.currentTime) * 1000
+    return rem > 0 ? rem : 0
+  } catch (_) {
+    return 0
+  }
+}
+
+// ——— Ağ durumu ———
+// renderer.js'teki fetch sarmalayıcısı API isteği başarısız olunca 'api-fetch-failed' yayar.
+// Gün devrinde yeni günün listesi boş gelirse "ağ mı yok, akış mı yok" ayrımı buna göre yapılır.
+const FAILURE_WINDOW_MS = 5 * 60 * 1000
+const apiFailures = []
+if (typeof window !== 'undefined') {
+  window.addEventListener('api-fetch-failed', () => {
+    const now = Date.now()
+    apiFailures.push(now)
+    while (apiFailures.length && now - apiFailures[0] > FAILURE_WINDOW_MS) apiFailures.shift()
+  })
+}
+function networkLooksDown() {
+  const now = Date.now()
+  while (apiFailures.length && now - apiFailures[0] > FAILURE_WINDOW_MS) apiFailures.shift()
+  return (typeof navigator !== 'undefined' && navigator.onLine === false) || apiFailures.length > 0
+}
+
+/** Kullanıcının kaydettiği ses seviyesi (0–1); renderer.js 'aimusic_volume' anahtarına yazar. */
+function readSavedVolume() {
+  try {
+    const raw = window.localStorage.getItem('aimusic_volume')
+    if (raw == null) return null
+    const v = Number(raw)
+    return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null
+  } catch (_) {
+    return null
+  }
+}
+
+/** Gün devrinde yeni güne taşınacak listeler (ağ yoksa yedek olarak kullanılır). */
+function snapshotListsForCarry(player) {
+  try {
+    const pl = player.state.controllers.playlist ? player.state.controllers.playlist.state.snapshot() : null
+    if (!pl || (!(pl.playlists && pl.playlists.length) && !(pl.specialPlaylists && pl.specialPlaylists.length))) return null
+    const sched = (c) => (c && c.state ? (c.state.snapshot().schedules || []) : [])
+    return {
+      playlist: {
+        playlists: pl.playlists || [],
+        specialPlaylists: pl.specialPlaylists || [],
+        userPlaylists: pl.userPlaylists || []
+      },
+      ad: sched(player.state.controllers.ad),
+      specialAd: sched(player.state.controllers.specialAd),
+      stockAd: sched(player.state.controllers.stockAd)
+    }
+  } catch (_) {
+    return null
+  }
+}
+
 // ——— Gün devri ———
 // VirtualPlayer gün sonunda kendini KALICI olarak durdurur: startRealtimeSimulation
 // içindeki scheduleNextAdvance, currentTime >= DAY olunca stopRealtimeSimulation()
@@ -378,7 +466,8 @@ function buildPlayerForDay(userId, client, persistStorage, startOfDay, carry, on
   // doğrulandı). Ses tek yerden yönetiliyor: playback.desiredVolume ve ondan
   // türeyen system.volume. Gün devrinde taze state kurulunca ikisi de
   // varsayılan 1'e dönüyor ve gece 00:00'da ses %100'e fırlıyordu.
-  const carriedVolume = carry && carry.volume != null ? carry.volume : null
+  // Gün devrinde önceki günün seviyesi, açılışta kullanıcının kaydettiği seviye taşınır.
+  const carriedVolume = carry && carry.volume != null ? carry.volume : readSavedVolume()
   const state = new VirtualPlayerState({
     system: {
       mode: 'cached',
@@ -400,6 +489,40 @@ function buildPlayerForDay(userId, client, persistStorage, startOfDay, carry, on
   // Referans (VirtualPlayerProvider): güne 0'dan başla, sonra startRealtimeSimulation tek sefer getLocalTime() % DAY'e sarar
   player.state.system.unsafeDirectModify({ deltaTime: 0, currentTime: 0 })
   player.use(client, persistStorage)
+
+  // Gün devrinde ağ yoksa önceki günün akışıyla devam (yeni oynatıcı schedule-fallback ile aynı).
+  // Kütüphane her gün için akışı yeniden çeker ve önbelleği güne göre anahtarlar; 00:00'da ağ
+  // yoksa (mağaza ağı kapalı, vekil sunucu, kesinti) yeni günün listesi boş kalır ve cihaz ağ
+  // gelene kadar susar. Yükleme bitince (status 'idle') liste boşsa ve ağ hatası görülmüşse
+  // önceki günün listeleri geçici olarak konur; ağ gelince kütüphanenin kendi güncellemesi
+  // (dakikalık yeniden deneme) gerçek listelerle ezer. Kütüphanenin veri akışına dokunulmaz;
+  // yalnızca boş kalan duruma aynı state API'siyle yedek konur.
+  if (carry && carry.lists) {
+    let applied = false
+    unsubs.push(player.state.system.subscribe(
+      (s) => s.status,
+      (status) => {
+        if (applied || status !== 'idle') return
+        applied = true
+        try {
+          const pl = player.state.controllers.playlist ? player.state.controllers.playlist.state.snapshot() : null
+          const empty = !pl || (!(pl.playlists && pl.playlists.length) && !(pl.specialPlaylists && pl.specialPlaylists.length))
+          if (!empty || !networkLooksDown()) return
+          console.warn('[VP] yeni günün akışı alınamadı (ağ hatası); önceki günün ' + carry.lists.playlist.playlists.length + ' listesiyle devam')
+          player.state.controllers.playlist.state.unsafeDirectModify(carry.lists.playlist)
+          if (player.state.controllers.ad && carry.lists.ad) player.state.controllers.ad.state.unsafeDirectModify({ schedules: carry.lists.ad })
+          if (player.state.controllers.specialAd && carry.lists.specialAd) player.state.controllers.specialAd.state.unsafeDirectModify({ schedules: carry.lists.specialAd })
+          if (player.state.controllers.stockAd && carry.lists.stockAd) player.state.controllers.stockAd.state.unsafeDirectModify({ schedules: carry.lists.stockAd })
+          resetScheduleCacheForNewDay()
+          syncState()
+        } catch (e) {
+          console.warn('[VP] yedek akış uygulanamadı:', e)
+        }
+      },
+      { notifyInSync: true }
+    ))
+  }
+
   player.startRealtimeSimulation()
 
   // Çalma listesini hızlandır: ilk syncState gelmeden schedule'ı arka planda hesapla
@@ -443,20 +566,26 @@ function buildPlayerForDay(userId, client, persistStorage, startOfDay, carry, on
     const deviceTimeMs = getDeviceTimeMs()
 
     let next = snapshotToPlayerState(sys, playback, playlist, ad, specialAd, stockAd, upcomingSchedule, deviceTimeMs)
-    // Yenileme sırasında yayın kesilmesin: yeni veri "yayın dışı" veya liste boş dönüyorsa, çalıyorsak önceki listeyi ve parçayı koru
+    // Geçişlerde ekran titremesin: yeni veri "kayıt yok" diyor ama parça hâlâ çalıyorsa
+    // (kayıtlar arası an, gün devrinde biten parça) gösterilen kaydı/listeyi koru; kütüphane
+    // hâlâ yükleniyorken (status 'loading') liste boş gelirse eski listeyi göster.
+    // Eskiden koşulsuz korunuyordu: yayın bitince son parça "çalıyor" görünmeye devam ediyor,
+    // kapalı günde gece yarısı dünün son şarkısı bir kez daha çalıyordu.
     if (typeof window !== 'undefined' && window.playerState) {
       const hadRecord = window.playerState.activeRecord && window.playerState.activeRecord.audio && window.playerState.activeRecord.audio.url
       const hadList = window.playerState.playlist && window.playerState.playlist.length > 0
       const newSaysOff = !next.activeRecord || !next.activeRecord.audio || !next.activeRecord.audio.url
       const newListEmpty = !next.playlist || next.playlist.length === 0
-      if (hadRecord && hadList && (newSaysOff || newListEmpty)) {
-        next = Object.assign({}, next, {
-          activeRecord: window.playerState.activeRecord,
-          playlist: window.playerState.playlist,
-          currentTrackIndex: window.playerState.currentTrackIndex,
-          ads: window.playerState.ads != null ? window.playerState.ads : next.ads
-        })
+      const stillPlaying = playingRemainingMs() > 1000
+      const loading = sys.status === 'loading'
+      const patch = {}
+      if (newSaysOff && hadRecord && stillPlaying) patch.activeRecord = window.playerState.activeRecord
+      if (newListEmpty && hadList && (loading || stillPlaying)) {
+        patch.playlist = window.playerState.playlist
+        patch.currentTrackIndex = window.playerState.currentTrackIndex
+        patch.ads = window.playerState.ads != null ? window.playerState.ads : next.ads
       }
+      if (Object.keys(patch).length) next = Object.assign({}, next, patch)
       Object.assign(window.playerState, next)
     }
     if (typeof window !== 'undefined') {
@@ -572,13 +701,18 @@ async function initVirtualPlayer(userId) {
     console.warn('[VP] FileCacheManager.activate:', e)
   }
 
-  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: true,
-      detectSessionInUrl: false
-    }
-  })
+  // Renderer'ın istemcisi varsa onu kullan: tek oturum, tek yenileme, tek zaman aşımı sarmalayıcısı.
+  // (İki ayrı GoTrueClient aynı yenileme jetonunu yarıştırıyordu.)
+  const client = (typeof window !== 'undefined' && window.supabaseClient)
+    ? window.supabaseClient
+    : createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+          autoRefreshToken: true,
+          persistSession: true,
+          detectSessionInUrl: false
+        },
+        global: (typeof window !== 'undefined' && window.__aiApiFetch) ? { fetch: window.__aiApiFetch } : undefined
+      })
 
   const indexedDBStorage = createIndexedDBStorage()
   const persistStorage = createJSONStorage(() => indexedDBStorage)
@@ -603,23 +737,6 @@ async function initVirtualPlayer(userId) {
   // Yerel gün kontrolü şart: simülasyon yerel gece yarısından birkaç ms önce
   // DAY'e ulaşırsa, tarih hâlâ eski gün olacağı için koşulsuz yeniden kurmak
   // sonsuz döngü yaratırdı.
-  /** Çalmakta olan parçadan geriye kalan süre (ms). Yoksa 0. */
-  function playingRemainingMs() {
-    try {
-      if (typeof document === 'undefined') return 0
-      const a = document.getElementById('app-audio')
-      if (!a || !a.src) return 0
-      const dur = (typeof window !== 'undefined' && window._trackDurationSec != null)
-        ? window._trackDurationSec
-        : (a.duration && !isNaN(a.duration) ? a.duration : 0)
-      if (!dur) return 0
-      const rem = (dur - a.currentTime) * 1000
-      return rem > 0 ? rem : 0
-    } catch (_) {
-      return 0
-    }
-  }
-
   function maybeRollOver() {
     if (rolling) return
     const today = getLocalStartOfDay()
@@ -642,7 +759,7 @@ async function initVirtualPlayer(userId) {
       const pb = current && current.player.state.controllers.playback.state.snapshot()
       // desiredVolume asıl kaynak; yoksa system.volume.
       const v = (pb && pb.desiredVolume != null) ? pb.desiredVolume : (sys ? sys.volume : null)
-      if (v != null) carry = { volume: v }
+      carry = { volume: v != null ? v : null, lists: current ? snapshotListsForCarry(current.player) : null }
     } catch (_) {}
     startDay(today, carry)
       .catch((e) => console.warn('[VP] gün devri:', e))

@@ -120,5 +120,41 @@ console.log('\n4) Gun devrinde ses seviyesi korunuyor');
 }
 
 // ---------------------------------------------------------------------------
+console.log('\n5) Kutuphanenin canli kaydi asil kaynaktir (yeni oynatici ile ayni)');
+{
+  // Cizelge bos/eski olsa bile kutuphanenin gercek kaydi calinir
+  const canli = snapshotToPlayerState(
+    { activeRecord: sarkiX, status: 'idle' }, { songPlayState: 'playing' }, null, null, null, null,
+    [], hms(9, 26)
+  );
+  kontrol('Cizelge bosken canli kayit X calinir', canli.activeRecord && canli.activeRecord.id === 'X',
+    canli.activeRecord && canli.activeRecord.id);
+  kontrol('Canli kaydin offseti cihaz saatine gore (147 sn)', canli.currentTime === 147, canli.currentTime + ' sn');
+
+  // Cizelge eski (program degisti): cizelgedeki slot A, kutuphane X caliyor -> X
+  const eskiCizelge = [Object.assign({}, sarkiA, { startTime: hms(9, 23, 33), endTime: hms(9, 30, 33) })];
+  const canli2 = snapshotToPlayerState(
+    { activeRecord: sarkiX }, {}, null, null, null, null, eskiCizelge, hms(9, 26)
+  );
+  kontrol('Cizelge ile kutuphane ayrisirsa kutuphane kazanir', canli2.activeRecord && canli2.activeRecord.id === 'X',
+    canli2.activeRecord && canli2.activeRecord.id);
+
+  // Canli kayit listedeki yerini baslangic saatiyle bulur
+  const canli3 = snapshotToPlayerState({ activeRecord: sarkiX }, {}, null, null, null, null, akis, hms(9, 26));
+  kontrol('Canli kaydin liste indeksi 2', canli3.currentTrackIndex === 2, String(canli3.currentTrackIndex));
+}
+
+console.log('\n6) Kutuphane takildiysa cizelgedeki slota dusulur');
+{
+  // Kutuphanenin kaydi 09:19\'da bitmis ama hala activeRecord olarak duruyor (dongu takildi)
+  const takili = snapshotToPlayerState({ activeRecord: sarkiA }, {}, null, null, null, null, akis, hms(9, 26));
+  kontrol('Bayat canli kayit yerine slot X secildi', takili.activeRecord && takili.activeRecord.id === 'X',
+    takili.activeRecord && takili.activeRecord.id);
+  // Yayin bitmis, canli kayit yok, slot yok -> kayit yok
+  const bitti = snapshotToPlayerState({ activeRecord: undefined }, {}, null, null, null, null, akis, hms(23, 0));
+  kontrol('Yayin bitince kayit yok', bitti.activeRecord === null);
+}
+
+// ---------------------------------------------------------------------------
 console.log('\n' + gecti + ' gecti, ' + kaldi + ' kaldi');
 process.exit(kaldi === 0 ? 0 : 1);
