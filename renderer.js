@@ -168,23 +168,52 @@
   var nativeFetch = window.fetch.bind(window);
   var refreshingSession = null;
   var sessionExpiredHandled = false;
+  // Oturum GERÇEKTEN geçersiz mi? (1.1.43) 29 Eylül kesintisinde Auth ulaşılamazken jetonu dolan
+  // cihazlar 401 aldı, yenileme ağ hatasıyla düştü ve program çıkış yaptı; mağazalar giriş ekranına
+  // düştü. Artık yalnızca sunucu açıkça "yenileme jetonu geçersiz / oturum yok" derse çıkış yapılır;
+  // ağ hatası, zaman aşımı ve 5xx geçicidir, oturum korunur.
+  var SESSION_LOSS_CODES = ['refresh_token_not_found', 'refresh_token_already_used', 'invalid_grant',
+    'session_not_found', 'session_expired', 'user_not_found', 'user_banned'];
+  function isDefinitiveSessionLoss(error) {
+    if (!error) return false;
+    var name = String(error.name || '');
+    if (name === 'AuthRetryableFetchError') return false;
+    if (name === 'AuthSessionMissingError') return true;
+    var status = Number(error.status || 0);
+    if (status === 0 || status >= 500) return false;
+    if (status === 400 || status === 401 || status === 403) {
+      var code = String(error.code || '').toLowerCase();
+      var msg = String(error.message || '').toLowerCase();
+      return SESSION_LOSS_CODES.indexOf(code) !== -1 || msg.indexOf('refresh token') !== -1 ||
+        msg.indexOf('invalid grant') !== -1 || msg.indexOf('session not found') !== -1 || msg.indexOf('user not found') !== -1;
+    }
+    return false;
+  }
   function refreshSessionOnce() {
     if (refreshingSession) return refreshingSession;
     var client = window.supabaseClient;
-    if (!client || !client.auth) return Promise.resolve(false);
+    if (!client || !client.auth) return Promise.resolve({ ok: false, definitive: false });
     refreshingSession = client.auth.refreshSession()
-      .then(function (res) { return !!(res && res.data && res.data.session) && !res.error; })
-      .catch(function () { return false; })
-      .then(function (ok) {
-        // Aynı anda gelen 401 yığını tek yenilemeyle karşılansın
-        setTimeout(function () { refreshingSession = null; }, 30000);
-        return ok;
+      .then(function (res) {
+        var err = res && res.error;
+        var ok = !!(res && res.data && res.data.session) && !err;
+        return { ok: ok, definitive: !ok && isDefinitiveSessionLoss(err), error: err };
+      })
+      .catch(function (err) { return { ok: false, definitive: false, error: err }; })
+      .then(function (r) {
+        // Aynı anda gelen 401 yığını tek yenilemeyle karşılansın; geçici hatada 60 sn bekle
+        setTimeout(function () { refreshingSession = null; }, r.ok ? 30000 : 60000);
+        return r;
       });
     return refreshingSession;
   }
   function handleUnauthorized() {
-    return refreshSessionOnce().then(function (ok) {
-      if (ok || sessionExpiredHandled) return;
+    return refreshSessionOnce().then(function (r) {
+      if (r.ok || sessionExpiredHandled) return;
+      if (!r.definitive) {
+        console.warn('[oturum] yenileme geçici olarak başarısız (' + ((r.error && (r.error.name + ': ' + r.error.message)) || 'ağ') + '); oturum korunuyor');
+        return;
+      }
       sessionExpiredHandled = true;
       try { window.dispatchEvent(new CustomEvent('api-session-expired')); } catch (_) {}
     });

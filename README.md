@@ -77,6 +77,12 @@ Kurulumda klasör seçilebilir, kısayol oluşturulur, Türkçe dil kullanılır
 
 ## Sürüm notları
 
+### 1.1.43 — sunucu kesintisinde toplu çıkış düzeltildi
+29 Eylül kesintisinde Auth servisi ulaşılamazken jetonu dolan cihazlar 401 alıp yenilemeyi deneyemedi ve
+program bunu "oturum geçersiz" sanarak çıkış yaptı. Artık yalnızca sunucu açıkça "yenileme jetonu geçersiz /
+oturum yok" derse çıkış yapılır; ağ hatası, zaman aşımı ve 5xx durumlarında oturum korunur, 60 sn sonra yeniden
+denenir. Yayın önbellekten sürer.
+
 ### 1.1.42 — yayın akışı yeni oynatıcıya (1.0.45) uyarlandı
 Electron sürümü, mimari (32+64 bit tek kurulum) ve güncelleme yolu (GitHub Releases) değişmedi.
 
