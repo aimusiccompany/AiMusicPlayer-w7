@@ -1348,7 +1348,10 @@
         updateUIFromState();
         return;
       }
-      startOffset = elapsedMs > 0 ? Math.min(elapsedMs / 1000, durationMs / 1000) : 0;
+      // Kütüphane her kaydın sonuna 1 sn pay bırakır ve geçişi ondan sonra yapar; küçük gecikmede
+      // parçanın ilk saniyesini atlamak yerine baştan başlat (parça o kadar geç biter, kesilmez). (1.1.44)
+      var START_FROM_BEGINNING_TOLERANCE_MS = 2500;
+      startOffset = elapsedMs > START_FROM_BEGINNING_TOLERANCE_MS ? Math.min(elapsedMs / 1000, durationMs / 1000) : 0;
     } else if (d.currentOffset != null && !isNaN(d.currentOffset)) {
       startOffset = Math.max(0, d.currentOffset);
     }

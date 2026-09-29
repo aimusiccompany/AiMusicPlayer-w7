@@ -77,6 +77,10 @@ Kurulumda klasör seçilebilir, kısayol oluşturulur, Türkçe dil kullanılır
 
 ## Sürüm notları
 
+### 1.1.44 — geçişte parça girişi atlanmıyor
+Kütüphanenin 1 sn parça sonu payı nedeniyle yeni parça 0,4–1 sn içinden başlıyordu; 2,5 sn'den küçük gecikmede
+parça baştan başlar (parça o kadar geç biter, kesilmez).
+
 ### 1.1.43 — sunucu kesintisinde toplu çıkış düzeltildi
 29 Eylül kesintisinde Auth servisi ulaşılamazken jetonu dolan cihazlar 401 alıp yenilemeyi deneyemedi ve
 program bunu "oturum geçersiz" sanarak çıkış yaptı. Artık yalnızca sunucu açıkça "yenileme jetonu geçersiz /
