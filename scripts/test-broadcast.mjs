@@ -8,6 +8,7 @@
  * Değişiklik yapmadan önce ve sonra bu testleri çalıştırın.
  */
 import { VirtualPlayerState } from '../node_modules/@ai-music-corp/virtual-player/dist/virtual-player-state.js';
+import { VirtualPlayer } from '../node_modules/@ai-music-corp/virtual-player/dist/virtual-player.js';
 import { snapshotToPlayerState } from '../src/vp-init.js';
 
 let gecti = 0;
@@ -156,5 +157,31 @@ console.log('\n6) Kutuphane takildiysa cizelgedeki slota dusulur');
 }
 
 // ---------------------------------------------------------------------------
+console.log('\n7) Tam saatli özel anons');
+{
+  const startTime = hms(10, 0);
+  const duration = 5000;
+  const st = new VirtualPlayerState({
+    system: { userId: 'test', mode: 'streaming', currentTime: startTime - 1, activeRecord: sarkiA }
+  });
+  const special = st.controllers.specialAd;
+  special.state.unsafeDirectModify({
+    schedules: [{
+      id: 'schedule', name: 'Tam saat', method: 'exact', interval: 10000,
+      startTime, endTime: startTime + 10000 + duration,
+      specialAd: { id: 'announcement', audios: [{ name: 'Anons', url: 'https://x/special.mp3', duration }] }
+    }]
+  });
+  const player = new VirtualPlayer({ state: st });
+  kontrol('Son tekrar zaman aralığına tam sığdığında çizelgede kalır',
+    special.state.snapshot().fixedScheduleTimeline.length === 2);
+  player.fastForwardTo(startTime);
+  kontrol('Tam saatte şarkıdan özel anonsa geçilir',
+    st.system.snapshot().activeRecord?.type === 'specialAd');
+  player.fastForwardTo(startTime + 10000);
+  kontrol('Aynı ses dosyası sonraki zamanında yeniden etkinleşir',
+    st.system.snapshot().activeRecord?.startTime === startTime + 10000);
+}
+
 console.log('\n' + gecti + ' gecti, ' + kaldi + ' kaldi');
 process.exit(kaldi === 0 ? 0 : 1);

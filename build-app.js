@@ -4,6 +4,7 @@
 const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
+require('./scripts/patch-virtual-player');
 
 const root = __dirname;
 const outApp = path.join(root, 'app.js');

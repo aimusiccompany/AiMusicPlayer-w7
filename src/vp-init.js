@@ -369,7 +369,7 @@ function playingRemainingMs() {
   try {
     if (typeof document === 'undefined') return 0
     const a = document.getElementById('app-audio')
-    if (!a || !a.src) return 0
+    if (!a || !a.src || a.paused || a.ended || a.error || a.readyState < 2) return 0
     const dur = (typeof window !== 'undefined' && window._trackDurationSec != null)
       ? window._trackDurationSec
       : (a.duration && !isNaN(a.duration) ? a.duration : 0)
@@ -553,7 +553,7 @@ function buildPlayerForDay(userId, client, persistStorage, startOfDay, carry, on
   }
 
   // VP akışı: sadece parça değişince activerecord gönder. Her state tick'te göndermek play() kesintisine yol açar.
-  let lastActiveRecordKey = null // 'url' veya url+id; parça değişince güncellenir
+  let lastActiveRecordKey = null
 
   function syncState() {
     const sys = player.state.system.snapshot()
@@ -594,7 +594,7 @@ function buildPlayerForDay(userId, client, persistStorage, startOfDay, carry, on
 
     const rec = next.activeRecord
     const hasRecord = rec && rec.audio && rec.audio.url
-    const trackKey = hasRecord ? (rec.audio.url + '|' + (rec.id || '')) : null
+    const trackKey = hasRecord ? JSON.stringify([rec.type, rec.id, rec.startTime, rec.audio.url]) : null
 
     if (trackKey !== lastActiveRecordKey && typeof window !== 'undefined') {
       lastActiveRecordKey = trackKey
@@ -626,8 +626,7 @@ function buildPlayerForDay(userId, client, persistStorage, startOfDay, carry, on
   }
 
   // Referans (use-virtual-player): selector değişen değeri döndürmeli; () => true callback'ı tetiklemez (equals aynı kalır).
-  const systemSelector = (s) => ({ activeRecord: s.activeRecord, currentTime: s.currentTime })
-  unsubs.push(player.state.system.subscribe(systemSelector, syncState, { notifyInSync: true }))
+  unsubs.push(player.state.system.subscribe((s) => s.activeRecord, syncState, { notifyInSync: true }))
   const playbackSelector = (s) => ({ songPlayState: s.songPlayState, historyLength: (s.history && s.history.length) || 0 })
   unsubs.push(player.state.controllers.playback.state.subscribe(playbackSelector, syncState, { notifyInSync: true }))
   if (player.state.controllers.playlist && player.state.controllers.playlist.state) {

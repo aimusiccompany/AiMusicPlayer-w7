@@ -544,7 +544,10 @@
       else nextStartLabel = 'Sıradaki yayın ' + t;
     }
     const contentBadge = document.getElementById('content-badge');
-    if (contentBadge) contentBadge.textContent = streamActive ? 'Şu an çalınıyor' : 'Yayın dışı';
+    var mediaLabel = !streamActive ? 'Yayın yok' : s.mutedByPause ? 'Duraklatıldı'
+      : mediaStatus === 'playing' ? (s.volume === 0 ? 'Ses kapalı' : 'Çalınıyor')
+      : mediaStatus === 'error' ? 'Ses oynatılamadı' : 'Yayın bekleniyor';
+    if (contentBadge) contentBadge.textContent = mediaLabel;
     const titleEl = document.getElementById('now-playing-title');
     const genreEl = document.getElementById('now-playing-genre');
     const playerTitleEl = document.getElementById('player-title');
@@ -594,9 +597,9 @@
     // Üst bar butonu: yayın varken Çalınıyor/Duraklatıldı, yokken Yayın yok (mutedByPause = kullanıcı duraklattı)
     const btnNowPlaying = document.getElementById('btn-now-playing-state');
     const btnPlayingText = document.getElementById('btn-playing-text');
-    if (btnPlayingText) btnPlayingText.textContent = streamActive ? (s.mutedByPause ? 'Duraklatıldı' : 'Çalınıyor') : 'Yayın yok';
+    if (btnPlayingText) btnPlayingText.textContent = mediaLabel;
     if (btnNowPlaying) {
-      btnNowPlaying.classList.toggle('paused', !streamActive || s.mutedByPause);
+      btnNowPlaying.classList.toggle('paused', mediaStatus !== 'playing' || s.mutedByPause);
       btnNowPlaying.classList.toggle('stream-off', !streamActive);
     }
     const btnPlay = document.getElementById('btn-play');
@@ -607,28 +610,7 @@
     var volPct = document.getElementById('volume-percent');
     if (volPct) volPct.textContent = (s.mutedByPause ? s.savedVolumeBeforeMute : s.volume) + '%';
 
-    // İlerleme: oynatma sırasında sadece appAudio.currentTime kullan (VP state ile çakışma olmasın)
-    const curEl = document.getElementById('progress-current');
-    const totEl = document.getElementById('progress-total');
-    const fillEl = document.getElementById('progress-fill');
-    var displayCurrent = s.currentTime;
-    var displayDuration = s.duration;
-    if (appAudio && appAudio.src) {
-      var at = appAudio.currentTime;
-      if (!isNaN(at) && at >= 0) displayCurrent = at;
-      displayDuration = (window._trackDurationSec != null ? window._trackDurationSec : (appAudio.duration && !isNaN(appAudio.duration) ? appAudio.duration : s.duration)) || s.duration;
-    }
-    if (curEl) curEl.textContent = formatTime(displayCurrent);
-    if (totEl) totEl.textContent = formatTime(displayDuration);
-    var progressPct = (displayDuration > 0 ? (displayCurrent / displayDuration) * 100 : 0);
-    if (fillEl) fillEl.style.width = progressPct + '%';
-    var heroFill = document.getElementById('np-progress-fill');
-    if (heroFill) heroFill.style.width = progressPct + '%';
-    var remainEl = document.getElementById('np-remaining');
-    if (remainEl) {
-      var remain = displayDuration > 0 ? Math.max(0, displayDuration - displayCurrent) : 0;
-      remainEl.textContent = (streamActive && displayDuration > 0) ? formatTime(remain) + ' kaldı' : '';
-    }
+    updatePlaybackProgress();
 
     // Hero: sıradaki kayıt (akış listesinden, yoksa VP'nin upcomingSchedule'ından)
     var nextRecord = null;
@@ -1010,13 +992,13 @@
     }
   });
 
-  // Cihaz saati: sadece bu zamanlayıcı günceller (saniyede bir, ekstra yük yok)
+  // Cihaz saatini ve anons listesini dakika değiştiğinde güncelle.
   function updateSidebarClock() {
     var now = new Date();
     var timeEl = document.getElementById('sidebar-time');
-    if (timeEl) timeEl.textContent = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    if (timeEl) timeEl.textContent = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', hour12: false });
     var h = now.getHours();
-    // Tarih ve selamlama saniyede bir değişmiyor; toLocaleDateString saniyede bir
+    // Tarih ve selamlama saniyede bir değişmiyor; toLocaleDateString her dakika
     // çağrılmasın diye yalnızca gün/saat dilimi değiştiğinde yazılır.
     var dayKey = now.getFullYear() + '-' + now.getMonth() + '-' + now.getDate();
     if (dayKey !== window._lastClockDayKey) {
@@ -1040,7 +1022,13 @@
     }
   }
   updateSidebarClock();
-  setInterval(updateSidebarClock, 1000);
+  function scheduleSidebarClock() {
+    setTimeout(function () {
+      updateSidebarClock();
+      scheduleSidebarClock();
+    }, 60000 - Date.now() % 60000);
+  }
+  scheduleSidebarClock();
 
   // Üst bar "Çalınıyor/Duraklatıldı" butonu da aynı toggle
   document.getElementById('btn-now-playing-state')?.addEventListener('click', function () {
@@ -1060,7 +1048,6 @@
       if (appAudio) appAudio.volume = s.volume / 100;
       var volEl = document.getElementById('volume');
       if (volEl) volEl.value = s.volume;
-      s.isPlaying = true;
     } else {
       s.mutedByPause = true;
       s.savedVolumeBeforeMute = s.volume;
@@ -1069,7 +1056,6 @@
         window.virtualPlayer.state.controllers.playback.setDesiredVolume(0);
       }
       if (appAudio) appAudio.volume = 0;
-      s.isPlaying = false;
     }
     updateUIFromState();
   });
@@ -1305,193 +1291,141 @@
     return now.getHours() * 60 * 60 * 1000 + now.getMinutes() * 60 * 1000 + now.getSeconds() * 1000 + now.getMilliseconds();
   }
 
-  // Virtual Player: activeRecord → ses oynat. Her parça (ilk dahil) cihaz saatine göre olması gereken saniyeden başlar; akış kayması olmaz.
+  // Yayın motoru geçiş zamanını belirler. Arayüz ses öğesinin gerçek durumunu gösterir.
   var appAudio = document.getElementById('app-audio');
   var activeRecordLoadId = 0;
+  var mediaStatus = 'idle';
+  var lastProgressText = '';
+  var playbackRecord = null;
+  var recoveryTimer = null;
+  var recoveryAttempts = 0;
+  var recoveryDelays = [500, 1500, 4000];
 
-  /** Çalmakta olan parçadan geriye kalan süre (sn). Çalmıyorsa 0. */
-  function audioRemainingSec() {
-    if (!appAudio || !appAudio.src) return 0;
-    var dur = window._trackDurationSec != null
-      ? window._trackDurationSec
-      : (appAudio.duration && !isNaN(appAudio.duration) ? appAudio.duration : 0);
-    if (!dur || isNaN(dur)) return 0;
-    var rem = dur - appAudio.currentTime;
-    return rem > 0 ? rem : 0;
+  function updatePlaybackProgress() {
+    var current = appAudio && appAudio.src ? Math.floor(appAudio.currentTime) : 0;
+    var duration = appAudio && appAudio.src ? (window._trackDurationSec || 0) : 0;
+    var key = current + '|' + duration;
+    if (key === lastProgressText) return;
+    lastProgressText = key;
+    const curEl = document.getElementById('progress-current');
+    const totEl = document.getElementById('progress-total');
+    const fillEl = document.getElementById('progress-fill');
+    var displayCurrent = current;
+    var displayDuration = duration;
+    if (curEl) curEl.textContent = formatTime(displayCurrent);
+    if (totEl) totEl.textContent = formatTime(displayDuration);
+    var progressPct = (displayDuration > 0 ? (displayCurrent / displayDuration) * 100 : 0);
+    if (fillEl) fillEl.style.width = progressPct + '%';
+    var heroFill = document.getElementById('np-progress-fill');
+    if (heroFill) heroFill.style.width = progressPct + '%';
+    var remainEl = document.getElementById('np-remaining');
+    if (remainEl) {
+      var remain = displayDuration > 0 ? Math.max(0, displayDuration - displayCurrent) : 0;
+      remainEl.textContent = (displayDuration > 0) ? formatTime(remain) + ' kaldı' : '';
+    }
+
   }
-  window._pendingActiveRecord = null;
-  window._currentActiveRecordUrl = null;
-  function applyActiveRecord(d) {
-    if (!d || !d.url) {
-      window._trackDurationSec = null;
-      window._currentActiveRecordUrl = null;
-      activeRecordLoadId++;
-      appAudio.pause();
-      appAudio.removeAttribute('src');
-      if (window.playerState) window.playerState.isPlaying = false;
-      updateUIFromState();
-      return;
-    }
-    window._currentActiveRecordUrl = d.url;
-    var thisLoadId = ++activeRecordLoadId;
-    var startTimeMs = d.startTimeMs != null ? Number(d.startTimeMs) : null;
-    var durationMs = d.durationMs != null ? Number(d.durationMs) : 0;
-    var startOffset = 0;
-    if (startTimeMs != null && durationMs > 0) {
-      var nowMs = getCurrentTimeInMilliseconds();
-      var elapsedMs = nowMs - startTimeMs;
-      if (elapsedMs >= durationMs) {
-        activeRecordLoadId++;
-        appAudio.pause();
-        appAudio.removeAttribute('src');
-        if (window.playerState) window.playerState.isPlaying = false;
-        updateUIFromState();
-        return;
-      }
-      // Kütüphane her kaydın sonuna 1 sn pay bırakır ve geçişi ondan sonra yapar; küçük gecikmede
-      // parçanın ilk saniyesini atlamak yerine baştan başlat (parça o kadar geç biter, kesilmez). (1.1.44)
-      var START_FROM_BEGINNING_TOLERANCE_MS = 2500;
-      startOffset = elapsedMs > START_FROM_BEGINNING_TOLERANCE_MS ? Math.min(elapsedMs / 1000, durationMs / 1000) : 0;
-    } else if (d.currentOffset != null && !isNaN(d.currentOffset)) {
-      startOffset = Math.max(0, d.currentOffset);
-    }
-    window._trackDurationSec = d.duration != null && !isNaN(d.duration) ? Number(d.duration) : null;
-    appAudio.src = d.url;
-    var vol = (window.playerState && window.playerState.volume != null) ? window.playerState.volume / 100 : 1;
-    if (window.playerState && window.playerState.mutedByPause) vol = 0;
-    appAudio.volume = vol;
-    appAudio.currentTime = startOffset;
-    if (window.playerState) window.playerState.currentTime = startOffset;
-    appAudio.addEventListener('canplay', function onCanPlay() {
-      appAudio.removeEventListener('canplay', onCanPlay);
-      if (thisLoadId !== activeRecordLoadId) return;
-      appAudio.currentTime = startOffset;
-      appAudio.play().catch(function (err) { console.warn('Oynatma hatası:', err); });
-      if (window.playerState) window.playerState.isPlaying = true;
-      updateUIFromState();
-    }, { once: true });
-    if (window.playerState) window.playerState.isPlaying = true;
+
+  function setMediaStatus(status) {
+    if (mediaStatus === status) return;
+    mediaStatus = status;
     updateUIFromState();
   }
+
+  function clearMediaRecovery() {
+    clearTimeout(recoveryTimer);
+    recoveryTimer = null;
+  }
+
+  function recoverMedia(delay) {
+    if (!playbackRecord || recoveryTimer !== null) return;
+    var record = playbackRecord;
+    var elapsed = getCurrentTimeInMilliseconds() - record.startTimeMs;
+    if (recoveryAttempts >= recoveryDelays.length ||
+        (record.durationMs > 0 && elapsed + delay >= record.durationMs)) {
+      setMediaStatus('error');
+      return;
+    }
+    setMediaStatus('loading');
+    recoveryTimer = setTimeout(function () {
+      recoveryTimer = null;
+      recoveryAttempts++;
+      applyActiveRecord(record);
+    }, delay);
+  }
+
+  function watchMediaProgress() {
+    if (!playbackRecord || recoveryTimer !== null) return;
+    recoveryTimer = setTimeout(function () {
+      recoveryTimer = null;
+      recoverMedia(recoveryDelays[recoveryAttempts] || 0);
+    }, 8000);
+  }
+
+  function applyActiveRecord(record) {
+    clearMediaRecovery();
+    var loadId = ++activeRecordLoadId;
+    var startTime = Number(record.startTimeMs);
+    var duration = Number(record.durationMs);
+    var elapsed = getCurrentTimeInMilliseconds() - startTime;
+    if (!record.url || (duration > 0 && elapsed >= duration)) {
+      playbackRecord = null;
+      window._trackDurationSec = null;
+      appAudio.pause();
+      appAudio.removeAttribute('src');
+      appAudio.load();
+      setMediaStatus('idle');
+      return;
+    }
+
+    window._trackDurationSec = duration > 0 ? duration / 1000 : null;
+    playbackRecord = record;
+    var offset = elapsed > 2500 ? elapsed / 1000 : 0;
+    appAudio.src = record.url;
+    var state = window.playerState;
+    appAudio.volume = state.mutedByPause ? 0 : state.volume / 100;
+    appAudio.currentTime = offset;
+    setMediaStatus('loading');
+    updatePlaybackProgress();
+    appAudio.play().catch(function (error) {
+      if (loadId !== activeRecordLoadId) return;
+      console.warn('Ses başlatılamadı:', error);
+      clearMediaRecovery();
+      if (error.name === 'NotAllowedError') setMediaStatus('error');
+      else recoverMedia(recoveryDelays[recoveryAttempts] || 0);
+    });
+    watchMediaProgress();
+  }
+
   if (appAudio) {
-    window.addEventListener('virtualplayer-activerecord', function (e) {
-      try {
-        var d = e.detail;
-        var remainingSec = audioRemainingSec();
-        if (!d || !d.url) {
-          // Yayın akışı "şu an kayıt yok" diyor. Bu gece yarısı normaldir: cihaz
-          // saati 0'a sarınca dünün akışında eşleşen slot kalmaz. Ama 00:00'dan
-          // önce başlamış parça hâlâ çalıyorsa YARIDA KESİLMEMELİ; bitince dursun.
-          if (remainingSec > 1) {
-            window._pendingActiveRecord = { __stopAfterCurrent: true };
-            clearTimeout(window._pendingActiveRecordTimeout);
-            return;
-          }
-          window._pendingActiveRecord = null;
-          applyActiveRecord(d);
-          return;
-        }
-        var isNewTrack = d.url !== window._currentActiveRecordUrl;
-        var dur = window._trackDurationSec != null ? window._trackDurationSec : (appAudio.duration && !isNaN(appAudio.duration) ? appAudio.duration : 0);
-        var cur = appAudio.currentTime;
-        // Parça bitmeden kesilmesin: mevcut parçada 3 sn'den fazla kaldıysa bitene kadar bekle
-        // Aynı dosyaya tekrar istek atmayalım: preloadNextTrack() zaten sıradaki parçayı yüklüyor, ekstra _preloadNextAudio kaldırıldı
-        if (isNewTrack && appAudio.src && dur > 0 && cur < dur - 3) {
-          window._pendingActiveRecord = d;
-          clearTimeout(window._pendingActiveRecordTimeout);
-          // Sabit 5 sn bekleyip yeni kaydı uygulamak, 5 sn'den fazla kalan parçayı
-          // yarıda kesiyordu. Kalan süre kadar bekle; 'ended' zaten daha önce
-          // tetiklenirse bekleyen kayıt oradan uygulanıyor. Üst sınır, süre
-          // bilgisi bozuksa sonsuz beklemeyi önler.
-          var waitMs = Math.min(Math.max(remainingSec * 1000 + 500, 1000), 15 * 60 * 1000);
-          window._pendingActiveRecordTimeout = setTimeout(function () {
-            if (window._pendingActiveRecord) {
-              var pending = window._pendingActiveRecord;
-              window._pendingActiveRecord = null;
-              applyActiveRecord(pending);
-              updateUIFromState();
-            }
-          }, waitMs);
-          return;
-        }
-        clearTimeout(window._pendingActiveRecordTimeout);
-        window._pendingActiveRecord = null;
-        applyActiveRecord(d);
-      } catch (err) {
-        console.warn('virtualplayer-activerecord:', err);
-      }
-      var d2 = e.detail;
-      if (d2) {
-        var nowImg = document.getElementById('now-playing-art-img');
-        var nowPl = document.getElementById('now-playing-art-placeholder');
-        var plImg = document.getElementById('player-art-img');
-        var plPl = document.getElementById('player-art-placeholder');
-        var adUrl = (d2.type === 'ad' || d2.type === 'specialAd' || d2.type === 'stockAd') && !d2.artworkUrl ? AD_LOGO_URL : d2.artworkUrl;
-        if (adUrl) {
-          if (nowImg) { nowImg.src = adUrl; nowImg.style.display = 'block'; }
-          if (nowPl) nowPl.style.display = 'none';
-          if (plImg) { plImg.src = adUrl; plImg.style.display = 'block'; }
-          if (plPl) plPl.style.display = 'none';
-        } else {
-          if (nowPl) nowPl.style.display = 'flex';
-          if (nowImg) nowImg.style.display = 'none';
-          if (plPl) plPl.style.display = 'flex';
-          if (plImg) plImg.style.display = 'none';
-        }
-      }
+    window.addEventListener('virtualplayer-activerecord', function (event) {
+      recoveryAttempts = 0;
+      applyActiveRecord(event.detail || {});
     });
-    window.addEventListener('virtualplayer-state', function (e) {
-      if (e.detail && e.detail.volume != null && !(window.playerState && window.playerState.mutedByPause))
-        appAudio.volume = e.detail.volume / 100;
+    window.addEventListener('virtualplayer-state', function (event) {
+      var state = window.playerState;
+      if (event.detail && event.detail.volume != null && !state.mutedByPause)
+        appAudio.volume = event.detail.volume / 100;
     });
-    appAudio.addEventListener('timeupdate', function () {
-      if (!window.playerState || !appAudio.src) return;
-      window.playerState.currentTime = appAudio.currentTime;
-      window.playerState.duration = appAudio.duration && !isNaN(appAudio.duration) ? appAudio.duration : window.playerState.duration;
-      var now = Date.now();
-      if (window._lastProgressUpdate != null && now - window._lastProgressUpdate < 250) return;
-      window._lastProgressUpdate = now;
-      var curEl = document.getElementById('progress-current');
-      var totEl = document.getElementById('progress-total');
-      var fillEl = document.getElementById('progress-fill');
-      if (curEl) curEl.textContent = formatTime(appAudio.currentTime);
-      var dur = window._trackDurationSec != null ? window._trackDurationSec : (appAudio.duration && !isNaN(appAudio.duration) ? appAudio.duration : 0);
-      if (totEl) totEl.textContent = formatTime(dur);
-      var pct = (dur > 0 ? (appAudio.currentTime / dur) * 100 : 0);
-      if (fillEl) fillEl.style.width = pct + '%';
-      var heroFillEl = document.getElementById('np-progress-fill');
-      if (heroFillEl) heroFillEl.style.width = pct + '%';
-      var remainingEl = document.getElementById('np-remaining');
-      if (remainingEl) remainingEl.textContent = dur > 0 ? formatTime(Math.max(0, dur - appAudio.currentTime)) + ' kaldı' : '';
+    appAudio.addEventListener('playing', function () {
+      clearMediaRecovery();
+      setMediaStatus('playing');
     });
+    appAudio.addEventListener('waiting', function () {
+      setMediaStatus('loading');
+      watchMediaProgress();
+    });
+    appAudio.addEventListener('error', function () {
+      console.warn('Ses dosyası yüklenemedi:', appAudio.error && appAudio.error.code);
+      clearMediaRecovery();
+      recoverMedia(recoveryDelays[recoveryAttempts] || 0);
+    });
+    appAudio.addEventListener('timeupdate', updatePlaybackProgress);
     appAudio.addEventListener('ended', function () {
-      clearTimeout(window._pendingActiveRecordTimeout);
-      if (window.playerState) window.playerState.isPlaying = false;
-      if (window._pendingActiveRecord) {
-        var pending = window._pendingActiveRecord;
-        window._pendingActiveRecord = null;
-        applyActiveRecord(pending);
-        var d2 = pending;
-        if (d2 && d2.url) {
-          var nowImg = document.getElementById('now-playing-art-img');
-          var nowPl = document.getElementById('now-playing-art-placeholder');
-          var plImg = document.getElementById('player-art-img');
-          var plPl = document.getElementById('player-art-placeholder');
-          var adUrl = (d2.type === 'ad' || d2.type === 'specialAd' || d2.type === 'stockAd') && !d2.artworkUrl ? AD_LOGO_URL : d2.artworkUrl;
-          if (adUrl) {
-            if (nowImg) { nowImg.src = adUrl; nowImg.style.display = 'block'; }
-            if (nowPl) nowPl.style.display = 'none';
-            if (plImg) { plImg.src = adUrl; plImg.style.display = 'block'; }
-            if (plPl) plPl.style.display = 'none';
-          } else {
-            if (nowPl) nowPl.style.display = 'flex';
-            if (nowImg) nowImg.style.display = 'none';
-            if (plPl) plPl.style.display = 'flex';
-            if (plImg) plImg.style.display = 'none';
-          }
-        }
-      }
-      updateUIFromState();
+      clearMediaRecovery();
+      playbackRecord = null;
+      setMediaStatus('idle');
+      if (window.requestVPSync) window.requestVPSync();
     });
   }
 

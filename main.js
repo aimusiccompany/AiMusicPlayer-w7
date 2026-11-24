@@ -415,6 +415,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      autoplayPolicy: 'no-user-gesture-required',
       // KRİTİK: pencere tepsiye indiğinde gizli sayılır ve Chromium varsayılan
       // olarak setInterval/setTimeout'ları kısar. Yayın senkronizasyonu (VP
       // simülasyonu, syncState, parça geçişleri) tamamen zamanlayıcılara dayandığı
